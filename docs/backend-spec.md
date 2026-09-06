@@ -1,21 +1,21 @@
-# LAST SCREEN バックエンド仕様 v1.1
+# LAST SCREEN バックエンド仕様 v1.2
 
 - 作成: 江藤拓海(役割B: Supabase/バックエンド担当) / チーム たきささえ / Electric Sheep 2026「LAST SCREEN」
-- 作成日: 2026-09-03 / 更新: 2026-09-04(Auth・Storage設計を確定)
+- 作成日: 2026-09-03 / 更新: 2026-09-06(AIモデル・入出力契約を確定)
 - スコープ: DB設計 + Auth設計 + Storage設計 + バックエンドAPI設計
 - 前提: Web版(Next.js + Vercel + Supabase)
 
 ## 0. この仕様の前提(チームで確認済みの判断)
 
 1. **技術スタック** — Web版(Next.js + Vercel + Supabase)。チーム全体合意済み。
-2. **AI連携** — 偏愛分析・映画構成生成はAI担当(佐藤佑作)が実装。バックエンドは接続点(インターフェース)だけ用意する。
-3. **AIモデル選定** — 何のAPIを使うかはAI担当マター、最終決定はチーム会議。バックエンドはモデル非依存に作る。
+2. **AI連携** — 偏愛分析・映画構成生成・動画生成はAI担当(佐藤佑作)が実装。バックエンドは接続点(インターフェース)と非同期処理の状態管理を用意する。
+3. **AIモデル選定** — 偏愛分析・映画構成生成はOpenAI Responses APIの`gpt-5.6-terra`、動画生成はGemini APIの`gemini-omni-1.1-flash`をMVPで採用する。ただしバックエンドはprovider/modelを直接参照せず、モデル非依存に作る。詳細と料金は[AI設計・モデル選定](./ai-architecture.md)を参照する。
 4. **DBスキーマ** — ChatGPT叩き台(users/diaries/photos/obsessions/movies)をそのまま採用して着手。
 5. **非同期処理** — ポーリング方式。
 6. **個人情報** — プロトタイプ完成優先。同意取得・削除フローは対象外(今回のスコープ外)。
 7. **スコープ** — 9/3中に完了させるのはDB設計とバックエンド設計の部分のみ。AI・フロント結線は別担当・別スケジュール。
 
-未確定のまま残っている論点(③AIモデルの具体的選定、⑧ハッカソンの新しい提出期限)は末尾の「8. 残る未確定事項」を参照。
+AIモデルの具体的選定は確定済み。残る論点は末尾の「8. 残る未確定事項」を参照。
 
 ## 1. 全体構成
 
@@ -32,7 +32,7 @@ Next.js API Routes ── ここが本仕様のスコープ
   └─▶ AI連携ポイント(6章) ── 佐藤佑作(AI担当)が中身を実装
            │
            ▼
-      動画生成AI → Supabase Storage → Web再生
+      Gemini動画生成 → FFmpeg統合 → Supabase Storage → Web再生
 ```
 
 ## 2. DBスキーマ
@@ -228,7 +228,7 @@ Next.js の Route Handlers(`app/api/**/route.ts`)として実装する。認証�
 
 ## 6. AI連携ポイント(佐藤佑作さんへの接続点)
 
-あなたはこの2つの関数を**呼び出すだけ**。中身(どのモデルを使うか・プロンプト設計)はAI担当の実装範囲。入出力のJSON契約だけをここで固定する。
+バックエンドの取次ぎ処理は契約①②の関数を**呼び出すだけ**とする。API呼び出し・プロンプト設計・契約③の動画生成adapter実装はAI担当の実装範囲とし、この章では境界となるJSON契約を固定する。
 
 - 実装(取次ぎ処理): あなた
 - 実装(AI処理本体): 佐藤佑作
@@ -248,8 +248,15 @@ type ObsessionAnalysis = {
   reason: string;
   keywords: string[];
   emotion: string[];
+  evidence: {
+    sourceType: "diary" | "photo";
+    summary: string;
+  }[];
+  visualMotifs: string[];
 };
 ```
+
+`evidence`には偏愛と判断した日記・写真上の根拠を保存する。`visualMotifs`は映画構成で繰り返し使う色、物、場所などの視覚的モチーフである。
 
 ### 契約② 映画構成生成 — `lib/ai/generateMovieScript.ts`
 
@@ -262,12 +269,45 @@ type Input = {
 // movies.movie_json にそのまま保存する。動画生成AI呼び出しの入力にもなる。
 type MovieScript = {
   title: string;
+  logline: string;
+  synopsis: string;
+  visualStyle: string;
   bgm: string;
-  scenes: { source: string; duration: number; prompt: string }[];
+  scenes: {
+    order: number;
+    source: string;
+    duration: number;
+    narration: string;
+    videoPrompt: string;
+    referencePhotoUrls: string[];
+  }[];
 };
 ```
 
-実際の動画生成AI呼び出し・BGM合成・レンダリングは、この2契約の外側(AI担当の実装内)で完結させ、完了後に`movies.status`を`completed`・`video_path`を更新してもらう形にする。バックエンド側はどのモデルを使うか(判断③)を一切知らなくてよい設計にしてある。
+`videoPrompt`は動画生成APIへ渡す英語のシーン別プロンプトとする。MVPでは3〜5シーン、各5〜6秒、合計15〜30秒を基本とする。ユーザー写真を使うシーンは`referencePhotoUrls`を指定し、image-to-videoで生成する。
+
+実際の動画生成AI呼び出し・BGM合成・レンダリングは、この2契約の外側(AI担当の実装内)で完結させ、完了後に`movies.status`を`completed`へ変更し、`video_path`を更新する。バックエンド側はprovider/model固有SDKを参照しない。
+
+### 契約③ 動画生成adapter — `lib/ai/video/VideoGenerator.ts`
+
+```ts
+type GenerateSceneInput = {
+  prompt: string;
+  duration: number;
+  referenceImageUrls: string[];
+};
+
+type GenerateSceneResult = {
+  providerJobId: string;
+  videoUrl?: string;
+};
+
+interface VideoGenerator {
+  generateScene(input: GenerateSceneInput): Promise<GenerateSceneResult>;
+}
+```
+
+MVP実装は`gemini-omni-1.1-flash`を呼び出す。将来RunwayやLumaへ変更する場合も、Route HandlerやDBアクセス層は変更せず、このadapter実装だけを差し替える。
 
 ## 7. 非同期処理とステータス遷移
 
@@ -280,17 +320,19 @@ analyzing  契約①実行中
   ↓
 generating 契約②実行中
   ↓
-processing 動画生成AI + BGM合成
+processing Geminiでシーン生成 + FFmpegで結合・字幕・BGM処理
   ↓
 completed  video_path 確定
 ```
 
 `failed`はこの列から外れた例外状態として`error_message`とともに返る(補完項目、2章参照)。
 
+動画生成は長時間化する可能性があるため、ブラウザからGemini APIを直接呼ばない。サーバーまたはワーカーが処理し、APIキーはサーバー環境変数にのみ保存する。同じmovie/sceneの二重生成を防ぐため、実装時にprovider側のjob ID、シーン別状態、再試行回数を記録する。
+
 ## 8. 残る未確定事項
 
-- **要チーム会議(判断③)**: 偏愛分析・映画構成生成に使うLLM、動画生成AIの具体的な選定。本仕様は契約①②のJSON形状さえ守ればモデルを問わないため、この会議の結論を待たずにバックエンド・DB実装を進めて問題ない。
 - **要確認(判断⑧)**: ハッカソンの新しい提出期限(8/31は経過済み)。今回のスコープでは影響しないが、AI連携・フロント結線の着手時期に関わるため別途確認を推奨。
+- **実装時に決定**: provider側のjob IDとシーン別生成状態を`movies.movie_json`へ含めるか、専用テーブルへ分離するか。MVPでは`movie_json`への保存で開始し、再生成や監査要件が増えた場合にテーブル分離を検討する。
 
 ---
 Electric-Sheep-team6 / hackson-no-yatu / 江藤拓海作成
