@@ -24,12 +24,16 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextMedia = Array.from(event.target.files ?? []).map((file) => ({
-      id: crypto.randomUUID(),
-      name: file.name,
-      type: file.type.startsWith("video") ? "video" : "image",
-      previewUrl: file.type.startsWith("image") ? URL.createObjectURL(file) : undefined,
-    }));
+    const nextMedia: MediaItem[] = Array.from(event.target.files ?? []).map((file) => {
+      const isVideo = file.type.startsWith("video");
+
+      return {
+        id: crypto.randomUUID(),
+        name: file.name,
+        type: isVideo ? "video" : "image",
+        previewUrl: isVideo ? undefined : URL.createObjectURL(file),
+      } satisfies MediaItem;
+    });
 
     if (nextMedia.length > 0) {
       setUploadedMedia((prev) => [...prev, ...nextMedia]);
