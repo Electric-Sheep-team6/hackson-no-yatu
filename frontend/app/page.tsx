@@ -91,7 +91,7 @@ export default function Home() {
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <header className="mb-8 flex items-center justify-between border-b border-white/10 pb-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">LAST SCREEN</p>
+            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Made in 冥途</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
               人生の最後に観る映画を、人生をかけて作る。
             </h1>
@@ -319,7 +319,7 @@ export default function Home() {
                 </div>
                 <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 via-black/30 to-transparent p-5">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">LAST SCREEN</p>
+                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Made in 冥途</p>
                     <p className="mt-1 text-xl font-semibold text-white">自分だけの記憶を一本の映画にする</p>
                   </div>
                   <button className="rounded-full bg-white/15 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm">
