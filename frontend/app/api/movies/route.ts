@@ -1,0 +1,188 @@
+import { after, NextResponse } from "next/server";
+
+import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
+import { generateMovieScript } from "@/lib/ai/generateMovieScript";
+import { mockVideoGenerator } from "@/lib/ai/video/mockVideoGenerator";
+import { ApiError, errorResponse } from "@/lib/apiError";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { createMovieSchema } from "@/lib/validation";
+
+async function processMovieGeneration(
+  movieId: string,
+  userId: string,
+  obsession: ObsessionAnalysis,
+) {
+  const admin = createAdminClient();
+
+  try {
+    let result = await admin
+      .from("movies")
+      .update({ status: "analyzing", updated_at: new Date().toISOString() })
+      .eq("id", movieId)
+      .eq("user_id", userId);
+    if (result.error) throw result.error;
+
+    const photosResult = await admin
+      .from("photos")
+      .select("storage_path")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true });
+    if (photosResult.error) throw photosResult.error;
+
+    const signedUrlResults = await Promise.all(
+      photosResult.data.map(({ storage_path }) =>
+        admin.storage.from("photos").createSignedUrl(storage_path, 3600),
+      ),
+    );
+    const photoUrls = signedUrlResults.map(({ data, error }) => {
+      if (error || !data) throw error ?? new Error("Failed to sign photo URL");
+      return data.signedUrl;
+    });
+
+    result = await admin
+      .from("movies")
+      .update({ status: "generating", updated_at: new Date().toISOString() })
+      .eq("id", movieId)
+      .eq("user_id", userId);
+    if (result.error) throw result.error;
+
+    const movie = await generateMovieScript({ obsession, photoUrls });
+
+    result = await admin
+      .from("movies")
+      .update({
+        status: "processing",
+        movie_json: movie,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", movieId)
+      .eq("user_id", userId);
+    if (result.error) throw result.error;
+
+    await Promise.all(
+      movie.scenes.map((scene) =>
+        mockVideoGenerator.generateScene({
+          prompt: scene.videoPrompt,
+          duration: scene.duration,
+          referenceImageUrls: scene.referencePhotoUrls,
+        }),
+      ),
+    );
+
+    result = await admin
+      .from("movies")
+      .update({
+        status: "completed",
+        video_path: `${userId}/${movieId}.mp4`,
+        error_message: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", movieId)
+      .eq("user_id", userId);
+    if (result.error) throw result.error;
+  } catch (error) {
+    console.error(error);
+    const { error: updateError } = await admin
+      .from("movies")
+      .update({
+        status: "failed",
+        error_message: "動画生成に失敗しました",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", movieId)
+      .eq("user_id", userId);
+
+    if (updateError) console.error(updateError);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      throw new ApiError(401, "unauthorized", "ログインが必要です");
+    }
+
+    const { obsessionId } = createMovieSchema.parse(await request.json());
+    const admin = createAdminClient();
+    const { data: obsession, error: obsessionError } = await admin
+      .from("obsessions")
+      .select("id, user_id, analysis_json")
+      .eq("id", obsessionId)
+      .maybeSingle();
+
+    if (obsessionError) throw obsessionError;
+    if (!obsession) {
+      throw new ApiError(404, "not_found", "偏愛が見つかりません");
+    }
+    if (obsession.user_id !== user.id) {
+      throw new ApiError(403, "forbidden", "この偏愛は使用できません");
+    }
+
+    const { data: movie, error: movieError } = await admin
+      .from("movies")
+      .insert({
+        user_id: user.id,
+        obsession_id: obsessionId,
+        status: "pending",
+      })
+      .select("id, status")
+      .single();
+
+    if (movieError) throw movieError;
+
+    after(() =>
+      processMovieGeneration(
+        movie.id,
+        user.id,
+        obsession.analysis_json as ObsessionAnalysis,
+      ),
+    );
+
+    return NextResponse.json(
+      { id: movie.id, status: "pending" as const },
+      { status: 201 },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function GET() {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      throw new ApiError(401, "unauthorized", "ログインが必要です");
+    }
+
+    const { data, error } = await supabase
+      .from("movies")
+      .select("id, status, obsession_id, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      items: data.map((movie) => ({
+        id: movie.id,
+        status: movie.status,
+        obsessionId: movie.obsession_id,
+        createdAt: movie.created_at,
+      })),
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
