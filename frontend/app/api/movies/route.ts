@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createMovieSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const DAILY_MOVIE_LIMIT = 3;
 
@@ -151,6 +152,12 @@ export async function POST(request: Request) {
     if (obsession.user_id !== user.id) {
       throw new ApiError(403, "forbidden", "この偏愛は使用できません");
     }
+
+    const { error: staleMovieError } = await admin.rpc(
+      "recover_stale_movie_generations",
+      { p_user_id: user.id },
+    );
+    if (staleMovieError) throw staleMovieError;
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { count, error: countError } = await admin

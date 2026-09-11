@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import type { MovieScript } from "@/lib/ai/generateMovieScript";
 import { ApiError, errorResponse } from "@/lib/apiError";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { movieIdSchema } from "@/lib/validation";
 
@@ -23,6 +24,12 @@ export async function GET(_request: Request, context: RouteContext) {
 
     const { id } = await context.params;
     const movieId = movieIdSchema.parse(id);
+    const { error: staleMovieError } = await createAdminClient().rpc(
+      "recover_stale_movie_generations",
+      { p_user_id: user.id },
+    );
+    if (staleMovieError) throw staleMovieError;
+
     const { data: movie, error } = await supabase
       .from("movies")
       .select("id, status, video_path, error_message, movie_json")
