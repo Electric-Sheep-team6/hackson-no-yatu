@@ -66,7 +66,14 @@ describe("POST /api/obsessions", () => {
         }),
       })),
     }));
-    const adminFrom = vi.fn(() => ({ insert }));
+    const adminFrom = vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          gte: vi.fn().mockResolvedValue({ count: 0, error: null }),
+        })),
+      })),
+      insert,
+    }));
     createAdminClientMock.mockReturnValue({ from: adminFrom });
 
     const response = await POST();
@@ -79,5 +86,33 @@ describe("POST /api/obsessions", () => {
     expect(userFrom).not.toHaveBeenCalledWith("obsessions");
     expect(diaryLimit).toHaveBeenCalledWith(50);
     expect(photoLimit).toHaveBeenCalledWith(12);
+  });
+
+  it("24時間の上限到達時はAIを呼び出さず429を返す", async () => {
+    createClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+    });
+    createAdminClientMock.mockReturnValue({
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            gte: vi.fn().mockResolvedValue({ count: 10, error: null }),
+          })),
+        })),
+      })),
+    });
+
+    const response = await POST();
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "rate_limited",
+    });
+    expect(analyzeObsessionMock).not.toHaveBeenCalled();
   });
 });

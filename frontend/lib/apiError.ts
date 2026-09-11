@@ -11,6 +11,7 @@ type ApiErrorCode =
   | "invalid_request"
   | "forbidden"
   | "not_found"
+  | "rate_limited"
   | "internal_error";
 
 export class ApiError extends Error {
