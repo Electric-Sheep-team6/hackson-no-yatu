@@ -67,14 +67,12 @@ describe("POST /api/obsessions", () => {
       })),
     }));
     const adminFrom = vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          gte: vi.fn().mockResolvedValue({ count: 0, error: null }),
-        })),
-      })),
       insert,
     }));
-    createAdminClientMock.mockReturnValue({ from: adminFrom });
+    createAdminClientMock.mockReturnValue({
+      from: adminFrom,
+      rpc: vi.fn().mockResolvedValue({ data: true, error: null }),
+    });
 
     const response = await POST();
 
@@ -98,13 +96,7 @@ describe("POST /api/obsessions", () => {
       },
     });
     createAdminClientMock.mockReturnValue({
-      from: vi.fn(() => ({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            gte: vi.fn().mockResolvedValue({ count: 10, error: null }),
-          })),
-        })),
-      })),
+      rpc: vi.fn().mockResolvedValue({ data: false, error: null }),
     });
 
     const response = await POST();

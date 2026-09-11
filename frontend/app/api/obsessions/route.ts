@@ -5,8 +5,6 @@ import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-const DAILY_ANALYSIS_LIMIT = 10;
-
 export async function POST() {
   try {
     const supabase = await createClient();
@@ -20,14 +18,12 @@ export async function POST() {
     }
 
     const admin = createAdminClient();
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count, error: countError } = await admin
-      .from("obsessions")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("created_at", since);
-    if (countError) throw countError;
-    if ((count ?? 0) >= DAILY_ANALYSIS_LIMIT) {
+    const { data: claimed, error: claimError } = await admin.rpc(
+      "claim_obsession_analysis",
+      { p_user_id: user.id },
+    );
+    if (claimError) throw claimError;
+    if (!claimed) {
       throw new ApiError(429, "rate_limited", "偏愛分析は24時間に10回までです");
     }
 

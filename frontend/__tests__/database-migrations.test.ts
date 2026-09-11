@@ -35,4 +35,21 @@ describe("database migrations", () => {
       "where status in ('pending', 'analyzing', 'generating', 'processing')",
     );
   });
+
+  it("偏愛分析の利用枠をトランザクション内で原子的に取得する", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0005_atomic_obsession_rate_limit.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("pg_advisory_xact_lock");
+    expect(migration).toContain("count(*) >= 10");
+    expect(migration).toContain("insert into public.obsession_analysis_requests");
+    expect(migration).toContain(
+      "grant execute on function public.claim_obsession_analysis(uuid) to service_role",
+    );
+  });
 });
