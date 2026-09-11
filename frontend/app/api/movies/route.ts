@@ -2,11 +2,14 @@ import { after, NextResponse } from "next/server";
 
 import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
 import { generateMovieScript } from "@/lib/ai/generateMovieScript";
+import { composeMovie } from "@/lib/ai/video/composeMovie";
 import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { createMovieSchema } from "@/lib/validation";
+
+export const runtime = "nodejs";
 
 async function processMovieGeneration(
   movieId: string,
@@ -61,6 +64,7 @@ async function processMovieGeneration(
     if (result.error) throw result.error;
 
     const generatedScenes: { order: number; path: string; providerJobId: string }[] = [];
+    const sceneVideos: Uint8Array[] = [];
     for (const scene of movie.scenes) {
       const generated = await geminiVideoGenerator.generateScene({
         prompt: scene.videoPrompt,
@@ -74,14 +78,24 @@ async function processMovieGeneration(
         .upload(path, generated.videoData, { contentType: "video/mp4", upsert: true });
       if (uploadError) throw uploadError;
       generatedScenes.push({ order: scene.order, path, providerJobId: generated.providerJobId });
+      sceneVideos.push(generated.videoData);
     }
+
+    const finalVideo = await composeMovie(sceneVideos);
+    const finalPath = `${userId}/${movieId}.mp4`;
+    const { error: finalUploadError } = await admin.storage.from("movies").upload(
+      finalPath,
+      finalVideo,
+      { contentType: "video/mp4", upsert: true },
+    );
+    if (finalUploadError) throw finalUploadError;
 
     result = await admin
       .from("movies")
       .update({
         status: "completed",
         movie_json: { ...movie, generatedScenes },
-        video_path: generatedScenes[0]?.path ?? null,
+        video_path: finalPath,
         error_message: null,
         updated_at: new Date().toISOString(),
       })
