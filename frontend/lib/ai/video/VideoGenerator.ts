@@ -6,7 +6,7 @@ export type GenerateSceneInput = {
 
 export type GenerateSceneResult = {
   providerJobId: string;
-  videoUrl?: string;
+  videoData?: Uint8Array;
 };
 
 export interface VideoGenerator {

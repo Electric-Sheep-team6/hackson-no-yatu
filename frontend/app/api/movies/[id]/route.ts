@@ -35,13 +35,23 @@ export async function GET(_request: Request, context: RouteContext) {
       throw new ApiError(404, "not_found", "映画が見つかりません");
     }
 
+    let videoUrl: string | null = null;
+    if (movie.status === "completed" && movie.video_path) {
+      const { data: signedVideo, error: signedVideoError } = await supabase.storage
+        .from("movies")
+        .createSignedUrl(movie.video_path, 3600);
+      if (signedVideoError) throw signedVideoError;
+      videoUrl = signedVideo?.signedUrl ?? null;
+    }
+
     return NextResponse.json({
       id: movie.id,
       status: movie.status,
       videoPath: movie.video_path,
+      videoUrl,
       errorMessage: movie.error_message,
       movie: movie.movie_json as MovieScript | null,
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error);
   }

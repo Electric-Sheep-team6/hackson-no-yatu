@@ -12,7 +12,7 @@ export class MockVideoGenerator implements VideoGenerator {
     void input;
     return {
       providerJobId: "mock-video-job",
-      videoUrl: "mock://generated-scene.mp4",
+      videoData: new Uint8Array([0]),
     };
   }
 }
