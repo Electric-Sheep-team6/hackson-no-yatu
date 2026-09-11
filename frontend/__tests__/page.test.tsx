@@ -13,7 +13,8 @@ describe("Home", () => {
         name: /人生の最後に観る映画を、人生をかけて作る。/i,
       }),
     ).toBeDefined();
-    expect(screen.getByLabelText(/今日の出来事/i)).toBeDefined();
+    expect(screen.getByLabelText(/新しい日記/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /偏愛を分析/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /映画を生成/i })).toBeDefined();
   });
 });

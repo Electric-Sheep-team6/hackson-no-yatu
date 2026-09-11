@@ -67,3 +67,33 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export async function GET() {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
+      throw new ApiError(401, "unauthorized", "ログインが必要です");
+    }
+
+    const { data, error } = await supabase
+      .from("photos")
+      .select("id, storage_path, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    return NextResponse.json({
+      items: data.map((photo) => ({
+        id: photo.id,
+        storagePath: photo.storage_path,
+        createdAt: photo.created_at,
+      })),
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
