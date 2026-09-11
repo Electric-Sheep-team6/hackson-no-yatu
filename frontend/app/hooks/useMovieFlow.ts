@@ -3,6 +3,7 @@
 import { type ChangeEvent, useCallback, useEffect, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import { emailSchema } from "@/lib/validation";
 
 type Diary = { id: string; content: string; createdAt: string };
 type PhotoPreview = { id: string; name: string; previewUrl: string };
@@ -34,13 +35,18 @@ export function useMovieFlow() {
   }, []);
 
   const authenticate = async (mode: "signIn" | "signUp") => {
+    const normalizedEmail = email.trim();
+    if (!emailSchema.safeParse(normalizedEmail).success) {
+      setMessage("メールアドレスの形式が正しくありません。");
+      return;
+    }
     setBusy("auth"); setMessage(null);
     try {
       const supabase = createClient();
       const { data, error } = mode === "signIn"
-        ? await supabase.auth.signInWithPassword({ email, password })
+        ? await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
         : await supabase.auth.signUp({
-            email,
+            email: normalizedEmail,
             password,
             options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
           });

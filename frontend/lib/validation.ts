@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const emailSchema = z.email();
+
 export const createDiarySchema = z.object({
   content: z.string().min(1).max(10_000),
 });
