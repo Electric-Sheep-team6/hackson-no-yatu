@@ -37,4 +37,41 @@ describe("GeminiVideoGenerator", () => {
 
     await expect(new GeminiVideoGenerator().generateScene({ prompt: "scene", duration: 5, referenceImageUrls: [] })).rejects.toThrow("Gemini から動画データが返されませんでした");
   });
+
+  it("画像ではない参照ファイルを拒否する", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response("not an image", {
+        headers: { "content-type": "text/html" },
+      }),
+    ) as typeof fetch;
+
+    await expect(
+      new GeminiVideoGenerator().generateScene({
+        prompt: "scene",
+        duration: 5,
+        referenceImageUrls: ["https://storage.example.com/not-image"],
+      }),
+    ).rejects.toThrow("参照ファイルが画像ではありません");
+  });
+
+  it("10MBを超える参照画像をダウンロード前に拒否する", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1]), {
+        headers: {
+          "content-type": "image/jpeg",
+          "content-length": String(10 * 1024 * 1024 + 1),
+        },
+      }),
+    ) as typeof fetch;
+
+    await expect(
+      new GeminiVideoGenerator().generateScene({
+        prompt: "scene",
+        duration: 5,
+        referenceImageUrls: ["https://storage.example.com/large.jpg"],
+      }),
+    ).rejects.toThrow("参照画像が大きすぎます");
+  });
 });

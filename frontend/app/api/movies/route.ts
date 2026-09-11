@@ -4,12 +4,15 @@ import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
 import { generateMovieScript } from "@/lib/ai/generateMovieScript";
 import { composeMovie } from "@/lib/ai/video/composeMovie";
 import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
+import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { createMovieSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
+
+const DAILY_MOVIE_LIMIT = 3;
 
 async function processMovieGeneration(
   movieId: string,
@@ -69,7 +72,10 @@ async function processMovieGeneration(
       const generated = await geminiVideoGenerator.generateScene({
         prompt: scene.videoPrompt,
         duration: scene.duration,
-        referenceImageUrls: scene.referencePhotoUrls,
+        referenceImageUrls: selectReferenceImageUrls(
+          scene.referencePhotoUrls,
+          photoUrls,
+        ),
       });
       if (!generated.videoData) throw new Error("動画データがありません");
       const path = `${userId}/${movieId}/scenes/${scene.order}.mp4`;
@@ -146,6 +152,17 @@ export async function POST(request: Request) {
       throw new ApiError(403, "forbidden", "この偏愛は使用できません");
     }
 
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count, error: countError } = await admin
+      .from("movies")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", since);
+    if (countError) throw countError;
+    if ((count ?? 0) >= DAILY_MOVIE_LIMIT) {
+      throw new ApiError(429, "rate_limited", "映画生成は24時間に3回までです");
+    }
+
     const { data: movie, error: movieError } = await admin
       .from("movies")
       .insert({
@@ -156,6 +173,13 @@ export async function POST(request: Request) {
       .select("id, status")
       .single();
 
+    if (movieError?.code === "23505") {
+      throw new ApiError(
+        409,
+        "conflict",
+        "生成中の映画があります。完了後に再度お試しください",
+      );
+    }
     if (movieError) throw movieError;
 
     after(() =>

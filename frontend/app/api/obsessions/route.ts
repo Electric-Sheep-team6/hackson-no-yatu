@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { analyzeObsession } from "@/lib/ai/analyzeObsession";
 import { ApiError, errorResponse } from "@/lib/apiError";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST() {
@@ -16,17 +17,29 @@ export async function POST() {
       throw new ApiError(401, "unauthorized", "ログインが必要です");
     }
 
+    const admin = createAdminClient();
+    const { data: claimed, error: claimError } = await admin.rpc(
+      "claim_obsession_analysis",
+      { p_user_id: user.id },
+    );
+    if (claimError) throw claimError;
+    if (!claimed) {
+      throw new ApiError(429, "rate_limited", "偏愛分析は24時間に10回までです");
+    }
+
     const [diariesResult, photosResult] = await Promise.all([
       supabase
         .from("diaries")
         .select("content")
         .eq("user_id", user.id)
-        .order("created_at", { ascending: true }),
+        .order("created_at", { ascending: false })
+        .limit(50),
       supabase
         .from("photos")
         .select("storage_path")
         .eq("user_id", user.id)
-        .order("created_at", { ascending: true }),
+        .order("created_at", { ascending: false })
+        .limit(12),
     ]);
 
     if (diariesResult.error) throw diariesResult.error;
@@ -51,10 +64,12 @@ export async function POST() {
     });
 
     const analysis = await analyzeObsession({
-      diaryTexts: diariesResult.data.map(({ content }) => content),
+      diaryTexts: [...diariesResult.data]
+        .reverse()
+        .map(({ content }) => content),
       photoUrls,
     });
-    const { data, error } = await supabase
+    const { data, error } = await admin
       .from("obsessions")
       .insert({
         user_id: user.id,

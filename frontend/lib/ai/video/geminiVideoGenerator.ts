@@ -2,16 +2,48 @@ import type { GenerateSceneInput, GenerateSceneResult, VideoGenerator } from "./
 
 const GEMINI_MODEL = "gemini-omni-1.1-flash";
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
 
 type GeminiInteraction = { id?: string; output_video?: { data?: string }; error?: { message?: string } };
+
+async function readReferenceImage(response: Response): Promise<Buffer> {
+  const declaredSize = Number(response.headers.get("content-length") ?? 0);
+  if (declaredSize > MAX_REFERENCE_IMAGE_BYTES) {
+    throw new Error("参照画像が大きすぎます");
+  }
+
+  if (!response.body) throw new Error("参照画像を読み取れませんでした");
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > MAX_REFERENCE_IMAGE_BYTES) {
+      await reader.cancel();
+      throw new Error("参照画像が大きすぎます");
+    }
+    chunks.push(value);
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+}
 
 async function toImageInput(url: string) {
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error("参照画像を取得できませんでした");
+  const contentType = response.headers.get("content-type")?.split(";")[0] ?? "";
+  if (!contentType.startsWith("image/")) {
+    throw new Error("参照ファイルが画像ではありません");
+  }
+  const image = await readReferenceImage(response);
   return {
     type: "image" as const,
-    data: Buffer.from(await response.arrayBuffer()).toString("base64"),
-    mime_type: response.headers.get("content-type")?.split(";")[0] ?? "image/jpeg",
+    data: image.toString("base64"),
+    mime_type: contentType,
   };
 }
 

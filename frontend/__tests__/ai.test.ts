@@ -41,6 +41,20 @@ describe("AI generation", () => {
     await expect(analyzeObsession({ diaryTexts: ["記録"], photoUrls: [] })).rejects.toThrow("偏愛分析の結果を読み取れませんでした");
   });
 
+  it("偏愛分析へ送る日記本文を合計5万文字に制限する", async () => {
+    responsesParse.mockResolvedValue({ output_parsed: analysis });
+
+    await analyzeObsession({
+      diaryTexts: ["あ".repeat(50_000), "送信されない日記"],
+      photoUrls: [],
+    });
+
+    const request = responsesParse.mock.calls[0][0];
+    const inputText = request.input[0].content[0].text as string;
+    expect(inputText).not.toContain("送信されない日記");
+    expect(inputText.match(/あ/g)).toHaveLength(50_000);
+  });
+
   it("creates a structured movie script with medium reasoning", async () => {
     const movie = {
       title: "雨のあと",
