@@ -1,12 +1,18 @@
 "use client";
 
-import { type ChangeEvent, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 
 type MediaItem = {
   id: string;
   name: string;
   type: "image" | "video";
   previewUrl?: string;
+};
+
+type CompletedMovie = {
+  id: string;
+  videoUrl: string;
+  title?: string;
 };
 
 const defaultQuestions = [
@@ -22,6 +28,26 @@ export default function Home() {
   const [uploadedMedia, setUploadedMedia] = useState<MediaItem[]>([]);
   const [isAnalyzed, setIsAnalyzed] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [completedMovie, setCompletedMovie] = useState<CompletedMovie | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCompletedMovie = async () => {
+      const moviesResponse = await fetch("/api/movies");
+      if (!moviesResponse.ok) return;
+      const { items } = await moviesResponse.json() as { items: { id: string; status: string }[] };
+      const completed = items.find((item) => item.status === "completed");
+      if (!completed) return;
+      const movieResponse = await fetch(`/api/movies/${completed.id}`);
+      if (!movieResponse.ok) return;
+      const movie = await movieResponse.json() as { id: string; videoUrl: string | null; movie: { title?: string } | null };
+      if (!cancelled && movie.videoUrl) setCompletedMovie({ id: movie.id, videoUrl: movie.videoUrl, title: movie.movie?.title });
+    };
+    void loadCompletedMovie().catch(() => {
+      // 未ログインや一時的な通信失敗時は、待機表示を維持する。
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextMedia: MediaItem[] = Array.from(event.target.files ?? []).map((file) => {
@@ -394,6 +420,11 @@ export default function Home() {
 
           <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
             <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[#0a0f17]">
+              {completedMovie ? (
+                <video controls preload="metadata" className="aspect-video w-full bg-black" src={completedMovie.videoUrl}>
+                  {completedMovie.title ?? "生成した映画"}
+                </video>
+              ) : (
               <div className="aspect-video bg-[radial-gradient(circle_at_center,_rgba(56,189,248,0.2),_transparent_40%),linear-gradient(135deg,_#0f172a,_#111827_45%,_#020617)] p-4">
                 <div className="flex h-full items-end justify-between rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,_rgba(3,7,18,0.15),_rgba(2,6,23,0.9),_rgba(2,6,23,0.9))] p-5">
                   <div>
@@ -407,6 +438,7 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+              )}
             </div>
 
             <div className="space-y-3">
