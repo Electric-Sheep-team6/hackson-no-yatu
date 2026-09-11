@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 
 import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
 import { generateMovieScript } from "@/lib/ai/generateMovieScript";
-import { mockVideoGenerator } from "@/lib/ai/video/mockVideoGenerator";
+import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -60,21 +60,28 @@ async function processMovieGeneration(
       .eq("user_id", userId);
     if (result.error) throw result.error;
 
-    await Promise.all(
-      movie.scenes.map((scene) =>
-        mockVideoGenerator.generateScene({
-          prompt: scene.videoPrompt,
-          duration: scene.duration,
-          referenceImageUrls: scene.referencePhotoUrls,
-        }),
-      ),
-    );
+    const generatedScenes: { order: number; path: string; providerJobId: string }[] = [];
+    for (const scene of movie.scenes) {
+      const generated = await geminiVideoGenerator.generateScene({
+        prompt: scene.videoPrompt,
+        duration: scene.duration,
+        referenceImageUrls: scene.referencePhotoUrls,
+      });
+      if (!generated.videoData) throw new Error("動画データがありません");
+      const path = `${userId}/${movieId}/scenes/${scene.order}.mp4`;
+      const { error: uploadError } = await admin.storage
+        .from("movies")
+        .upload(path, generated.videoData, { contentType: "video/mp4", upsert: true });
+      if (uploadError) throw uploadError;
+      generatedScenes.push({ order: scene.order, path, providerJobId: generated.providerJobId });
+    }
 
     result = await admin
       .from("movies")
       .update({
         status: "completed",
-        video_path: `${userId}/${movieId}.mp4`,
+        movie_json: { ...movie, generatedScenes },
+        video_path: generatedScenes[0]?.path ?? null,
         error_message: null,
         updated_at: new Date().toISOString(),
       })
