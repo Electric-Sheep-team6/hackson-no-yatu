@@ -37,9 +37,15 @@ export function useMovieFlow() {
     setBusy("auth"); setMessage(null);
     try {
       const supabase = createClient();
-      const { data, error } = mode === "signIn" ? await supabase.auth.signInWithPassword({ email, password }) : await supabase.auth.signUp({ email, password });
+      const { data, error } = mode === "signIn"
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          });
       if (error) throw error;
-      setUserEmail(data.user?.email ?? null); setPassword("");
+      setUserEmail(data.session?.user.email ?? null); setPassword("");
       if (data.session) await refreshLibrary();
       setMessage(mode === "signUp" && !data.session ? "確認メールを送信しました。確認後にログインしてください。" : mode === "signUp" ? "アカウントを作成しました。" : "ログインしました。保存済みの記録を読み込みました。");
     } catch (error) { setMessage(error instanceof Error ? error.message : "認証に失敗しました。"); }
