@@ -95,4 +95,30 @@ describe("database migrations", () => {
       "grant execute on function public.recover_stale_movie_generations(uuid) to service_role",
     );
   });
+  it("SECURITY DEFINER関数をクライアントロールから実行できなくする", () => {
+    const migration = readFileSync(
+      resolve(process.cwd(), "../supabase/migrations/0008_lock_down_security_definer_execute.sql"),
+      "utf8",
+    );
+
+    expect(migration).toContain("revoke execute on function public.handle_new_user() from public, anon, authenticated");
+    expect(migration).toContain("revoke execute on function public.claim_obsession_analysis(uuid) from public, anon, authenticated");
+    expect(migration).toContain("revoke execute on function public.recover_stale_movie_generations(uuid) from public, anon, authenticated");
+    expect(migration).toContain("grant execute on function public.claim_obsession_analysis(uuid) to service_role");
+    expect(migration).toContain("grant execute on function public.recover_stale_movie_generations(uuid) to service_role");
+  });
+
+  it("photosとmoviesのprivate Storageバケットを冪等に作成する", () => {
+    const migration = readFileSync(
+      resolve(process.cwd(), "../supabase/migrations/0009_create_storage_buckets.sql"),
+      "utf8",
+    );
+
+    expect(migration).toContain("insert into storage.buckets");
+    expect(migration).toContain("('photos', 'photos', false)");
+    expect(migration).toContain("('movies', 'movies', false)");
+    expect(migration).toContain("on conflict (id) do update");
+    expect(migration).toContain("public = excluded.public");
+  });
+
 });
