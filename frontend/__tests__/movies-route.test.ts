@@ -47,6 +47,7 @@ describe("POST /api/movies", () => {
         gte: vi.fn().mockResolvedValue({ count: 0, error: null }),
       })),
     }));
+    const recoverStale = vi.fn().mockResolvedValue({ data: 1, error: null });
     createAdminClientMock.mockReturnValue({
       from: vi.fn((table: string) =>
         table === "obsessions"
@@ -66,6 +67,7 @@ describe("POST /api/movies", () => {
             }
           : { select: moviesSelect, insert },
       ),
+      rpc: recoverStale,
     });
 
     const response = await POST(
@@ -83,6 +85,10 @@ describe("POST /api/movies", () => {
       error: "conflict",
     });
     expect(afterMock).not.toHaveBeenCalled();
+    expect(recoverStale).toHaveBeenCalledWith(
+      "recover_stale_movie_generations",
+      { p_user_id: "user-1" },
+    );
   });
 
   it("24時間の上限到達時は映画ジョブを作らず429を返す", async () => {
@@ -122,6 +128,7 @@ describe("POST /api/movies", () => {
               insert,
             },
       ),
+      rpc: vi.fn().mockResolvedValue({ data: 0, error: null }),
     });
 
     const response = await POST(
@@ -140,5 +147,11 @@ describe("POST /api/movies", () => {
     });
     expect(insert).not.toHaveBeenCalled();
     expect(afterMock).not.toHaveBeenCalled();
+  });
+
+  it("全プランで利用できる実行時間上限を指定する", async () => {
+    const route = await import("@/app/api/movies/route");
+
+    expect(route.maxDuration).toBe(300);
   });
 });
