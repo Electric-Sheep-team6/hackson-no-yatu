@@ -11,6 +11,7 @@ type ApiErrorCode =
   | "invalid_request"
   | "forbidden"
   | "not_found"
+  | "conflict"
   | "rate_limited"
   | "internal_error";
 

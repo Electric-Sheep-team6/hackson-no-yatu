@@ -160,6 +160,13 @@ export async function POST(request: Request) {
       .select("id, status")
       .single();
 
+    if (movieError?.code === "23505") {
+      throw new ApiError(
+        409,
+        "conflict",
+        "生成中の映画があります。完了後に再度お試しください",
+      );
+    }
     if (movieError) throw movieError;
 
     after(() =>

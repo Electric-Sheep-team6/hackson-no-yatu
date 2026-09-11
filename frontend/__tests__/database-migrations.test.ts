@@ -19,4 +19,20 @@ describe("database migrations", () => {
       "revoke all on function public.handle_new_user() from public",
     );
   });
+
+  it("利用者ごとの実行中映画をDB制約で1件に制限する", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0004_prevent_concurrent_movies.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("create unique index");
+    expect(migration).toContain("on public.movies (user_id)");
+    expect(migration).toContain(
+      "where status in ('pending', 'analyzing', 'generating', 'processing')",
+    );
+  });
 });
