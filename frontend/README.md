@@ -1,8 +1,26 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LAST SCREEN frontend
+
+Supabase をバックエンドに使う Next.js アプリです。画面から以下の一連の操作を実行できます。
+
+- メール／パスワードで登録・ログイン
+- 日記を `POST /api/diaries` に保存
+- 写真・動画を private `photos` バケットへアップロードし、`POST /api/photos` で記録
+- `POST /api/obsessions` で偏愛を分析
+- `POST /api/movies` で映画生成を開始し、`GET /api/movies/:id` を2秒ごとにポーリング
 
 ## Getting Started
 
-First, run the development server:
+## Setup
+
+`.env.local.example` をコピーして `.env.local` を作成し、Supabase プロジェクトの値を設定します。
+
+```bash
+cp .env.local.example .env.local
+```
+
+`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY` は必須です。DB と Storage はリポジトリ直下の `supabase/migrations` を Supabase プロジェクトへ適用してください。
+
+依存関係を入れ、開発サーバーを起動します。
 
 ```bash
 npm run dev
@@ -14,11 +32,9 @@ pnpm dev
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで [http://localhost:3000](http://localhost:3000) を開き、右上から登録またはログインしてください。メール確認を有効にしている場合は、登録後に確認メールを完了してからログインします。
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
 

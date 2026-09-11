@@ -1,12 +1,34 @@
 "use client";
 
-import { type ChangeEvent, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+
+import { createClient } from "@/lib/supabase/client";
 
 type MediaItem = {
   id: string;
   name: string;
   type: "image" | "video";
+  file: File;
   previewUrl?: string;
+  storagePath?: string;
+};
+
+type Obsession = {
+  id: string;
+  title: string;
+  reason: string;
+  createdAt: string;
+};
+
+type Movie = {
+  id: string;
+  status: "pending" | "analyzing" | "generating" | "processing" | "completed" | "failed";
+  errorMessage: string | null;
+  movie: {
+    title: string;
+    logline: string;
+    scenes: { order: number; source: string; narration: string }[];
+  } | null;
 };
 
 const defaultQuestions = [
@@ -19,9 +41,150 @@ const defaultQuestions = [
 
 export default function Home() {
   const [diary, setDiary] = useState("");
+  const [lastSavedDiary, setLastSavedDiary] = useState<string | null>(null);
   const [uploadedMedia, setUploadedMedia] = useState<MediaItem[]>([]);
-  const [isAnalyzed, setIsAnalyzed] = useState(false);
+  const [obsessions, setObsessions] = useState<Obsession[]>([]);
+  const [selectedObsession, setSelectedObsession] = useState<Obsession | null>(null);
+  const [movie, setMovie] = useState<Movie | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  const getErrorMessage = async (response: Response) => {
+    const body = await response.json().catch(() => null);
+    return body?.message ?? "通信に失敗しました。もう一度お試しください。";
+  };
+
+  const saveInputs = async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("ログインしてから分析してください");
+
+    if (diary.trim() && diary.trim() !== lastSavedDiary) {
+      const diaryResponse = await fetch("/api/diaries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: diary.trim() }),
+      });
+      if (!diaryResponse.ok) throw new Error(await getErrorMessage(diaryResponse));
+      setLastSavedDiary(diary.trim());
+    }
+
+    for (const item of uploadedMedia.filter((media) => !media.storagePath)) {
+      const extension = item.file.name.split(".").pop()?.toLowerCase() || "bin";
+      const storagePath = `${user.id}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from("photos")
+        .upload(storagePath, item.file, { contentType: item.file.type || undefined });
+      if (uploadError) throw uploadError;
+
+      const photoResponse = await fetch("/api/photos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath }),
+      });
+      if (!photoResponse.ok) throw new Error(await getErrorMessage(photoResponse));
+      setUploadedMedia((current) => current.map((media) =>
+        media.id === item.id ? { ...media, storagePath } : media,
+      ));
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!diary.trim() && uploadedMedia.length === 0) {
+      setMessage("日記または写真・動画を追加してください。");
+      return;
+    }
+    setIsAnalyzing(true);
+    setMessage(null);
+    try {
+      await saveInputs();
+      const response = await fetch("/api/obsessions", { method: "POST" });
+      if (!response.ok) throw new Error(await getErrorMessage(response));
+      const obsession = await response.json() as Obsession;
+      setObsessions((current) => [obsession, ...current]);
+      setSelectedObsession(obsession);
+      setMessage("偏愛を分析しました。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "分析に失敗しました。");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!selectedObsession) {
+      setMessage("先に偏愛を分析して選択してください。");
+      return;
+    }
+    setIsGenerating(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/movies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ obsessionId: selectedObsession.id }),
+      });
+      if (!response.ok) throw new Error(await getErrorMessage(response));
+      const created = await response.json() as { id: string };
+      setMovie({ id: created.id, status: "pending", errorMessage: null, movie: null });
+    } catch (error) {
+      setIsGenerating(false);
+      setMessage(error instanceof Error ? error.message : "映画生成を開始できませんでした。");
+    }
+  };
+
+  const handleAuth = async (mode: "signIn" | "signUp") => {
+    setIsAuthenticating(true);
+    setMessage(null);
+    try {
+      const supabase = createClient();
+      const { data, error } = mode === "signIn"
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+      setUserEmail(data.user?.email ?? null);
+      setPassword("");
+      setMessage(mode === "signUp" && !data.session ? "確認メールを送信しました。メールを確認してからログインしてください。" : mode === "signUp" ? "アカウントを作成しました。" : "ログインしました。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ログインに失敗しました。");
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  useEffect(() => {
+    try {
+      const supabase = createClient();
+      void supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
+    } catch {
+      // 環境変数未設定時は、操作時に案内を表示する。
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!movie || ["completed", "failed"].includes(movie.status)) return;
+    const timer = window.setInterval(async () => {
+      const response = await fetch(`/api/movies/${movie.id}`);
+      if (response.ok) {
+        const nextMovie = await response.json() as Movie;
+        setMovie(nextMovie);
+        if (["completed", "failed"].includes(nextMovie.status)) {
+          setIsGenerating(false);
+          setMessage(
+            nextMovie.status === "completed"
+              ? "映画の生成が完了しました。"
+              : nextMovie.errorMessage ?? "映画の生成に失敗しました。",
+          );
+        }
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [movie]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextMedia: MediaItem[] = Array.from(event.target.files ?? []).map((file) => {
@@ -31,6 +194,7 @@ export default function Home() {
         id: crypto.randomUUID(),
         name: file.name,
         type: isVideo ? "video" : "image",
+        file,
         previewUrl: isVideo ? undefined : URL.createObjectURL(file),
       } satisfies MediaItem;
     });
@@ -57,39 +221,6 @@ export default function Home() {
     ];
   }, [diary, uploadedMedia]);
 
-  const obsessionCandidates = useMemo(() => {
-    if (uploadedMedia.length === 0) {
-      return [];
-    }
-
-    const imageCount = uploadedMedia.filter((item) => item.type === "image").length;
-    const videoCount = uploadedMedia.filter((item) => item.type === "video").length;
-
-    return [
-      {
-        title: "繰り返し映る場面",
-        subtitle: `${uploadedMedia.length}件の記録の中で反復率が高い場所と時間帯`,
-        reason:
-          "同じ場所や同じ時間帯のメディアが複数存在しているため、本人がその景色に最も強く惹かれている可能性が高いです。",
-        tags: ["場所", "時間", "光"],
-      },
-      {
-        title: "繰り返し登場する人物",
-        subtitle: `${imageCount}枚の写真に、同じ人物や顔が含まれている可能性が高い`,
-        reason:
-          "写真の中で同じ人物が何度も現れている場合、その人が記憶の中心にあると判断できます。",
-        tags: ["人物", "記憶", "家族"],
-      },
-      {
-        title: "音と帰路の感覚",
-        subtitle: `${videoCount}件の動画で、移動や帰宅の感覚が強く残っている`,
-        reason:
-          "動画と音声の記録は、ただの景色ではなく、本人が帰路や音に対して強い執着を持っていることを示します。",
-        tags: ["音", "帰路", "動線"],
-      },
-    ];
-  }, [uploadedMedia]);
-
   return (
     <main className="min-h-screen bg-[#070b12] text-white">
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
@@ -100,9 +231,20 @@ export default function Home() {
               人生の最後に観る映画を、人生をかけて作る。
             </h1>
           </div>
-          <button className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 transition hover:border-cyan-300 hover:bg-cyan-500/20">
-            予告編を視聴
-          </button>
+          {userEmail ? (
+            <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100">
+              {userEmail}
+            </span>
+          ) : (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="メールアドレス" className="w-36 rounded-full border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-500" />
+              <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="パスワード" className="w-28 rounded-full border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-500" />
+              <button type="button" onClick={() => handleAuth("signIn")} disabled={isAuthenticating || !email || !password} className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50">
+                {isAuthenticating ? "ログイン中" : "ログイン"}
+              </button>
+              <button type="button" onClick={() => handleAuth("signUp")} disabled={isAuthenticating || !email || !password} className="text-xs text-cyan-200 underline disabled:opacity-50">新規登録</button>
+            </div>
+          )}
         </header>
 
         <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
@@ -178,18 +320,21 @@ export default function Home() {
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={() => setIsAnalyzed(true)}
+                onClick={handleAnalyze}
+                disabled={isAnalyzing}
                 className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-cyan-100"
               >
-                偏愛を分析
+                {isAnalyzing ? "分析中..." : "偏愛を分析"}
               </button>
               <button
                 type="button"
-                onClick={() => setIsGenerating(true)}
+                onClick={handleGenerate}
+                disabled={isGenerating || !selectedObsession}
                 className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-5 py-2.5 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-500/20"
               >
-                映画を生成
+                {isGenerating ? "生成を開始中..." : "映画を生成"}
               </button>
+              {message && <p role="status" className="text-sm text-cyan-100">{message}</p>}
             </div>
           </div>
 
@@ -204,7 +349,7 @@ export default function Home() {
           </aside>
         </section>
 
-        {isAnalyzed && (
+        {selectedObsession && (
           <section className="mt-10 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
             <div className="rounded-[28px] border border-white/10 bg-slate-900/80 p-6">
               <div className="mb-4 flex items-center justify-between">
@@ -215,13 +360,14 @@ export default function Home() {
               </div>
 
               <div className="space-y-3">
-                {obsessionCandidates.length > 0 ? (
-                  obsessionCandidates.map((item, index) => (
+                {obsessions.length > 0 ? (
+                  obsessions.map((item, index) => (
                     <button
-                      key={item.title}
+                      key={item.id}
                       type="button"
+                      onClick={() => setSelectedObsession(item)}
                       className={`w-full rounded-2xl border p-4 text-left transition ${
-                        index === 0
+                        selectedObsession.id === item.id
                           ? "border-cyan-400/60 bg-cyan-500/10"
                           : "border-white/10 bg-white/5 hover:border-white/20"
                       }`}
@@ -229,7 +375,7 @@ export default function Home() {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="text-base font-semibold text-white">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-300">{item.subtitle}</p>
+                          <p className="mt-1 text-sm text-slate-300">{item.reason}</p>
                         </div>
                         <span className="rounded-full border border-white/10 bg-slate-800 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-300">
                           #{index + 1}
@@ -247,8 +393,8 @@ export default function Home() {
 
             <div className="rounded-[28px] border border-cyan-400/15 bg-gradient-to-br from-slate-900 to-cyan-950/30 p-6">
               <div className="flex flex-wrap items-center gap-2">
-                {obsessionCandidates.length > 0 ? (
-                  obsessionCandidates[0].tags.map((tag) => (
+                {selectedObsession ? (
+                  ["偏愛", "記憶", "映画"].map((tag) => (
                     <span key={tag} className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.15em] text-cyan-100">
                       {tag}
                     </span>
@@ -261,20 +407,16 @@ export default function Home() {
               </div>
 
               <h3 className="mt-5 text-2xl font-semibold text-white">
-                {obsessionCandidates.length > 0 ? obsessionCandidates[0].title : "アップロードが解析対象です"}
+                {selectedObsession.title}
               </h3>
               <p className="mt-3 text-base leading-7 text-slate-200">
-                {obsessionCandidates.length > 0
-                  ? obsessionCandidates[0].reason
-                  : "写真・動画・日記を読み解くことで、誰にも気づかれないほど細かい執着を抽出します。"}
+                {selectedObsession.reason}
               </p>
 
               <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
                 <p className="text-xs uppercase tracking-[0.22em] text-slate-400">根拠</p>
                 <p className="mt-2 text-sm leading-7 text-slate-200">
-                  {obsessionCandidates.length > 0
-                    ? `${uploadedMedia.length}件のメディアから、反復が確認できる記録を根拠として抽出しています。`
-                    : "アップロードした実データが、分析の根拠になります。ここに書かれた説明は仮の導線です。"}
+                  {`${uploadedMedia.length}件のメディアと日記を根拠に、AIが抽出しています。`}
                 </p>
               </div>
 
@@ -336,9 +478,13 @@ export default function Home() {
                 <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-cyan-400 via-indigo-400 to-violet-400" />
               </div>
 
-              {isGenerating && (
+              {movie && (
                 <div className="mt-5 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-4 text-sm text-cyan-100">
-                  AIがアップロードした素材から、章構成と予告編を生成しています。
+                  {movie.status === "completed"
+                    ? "映画の構成を受け取りました。"
+                    : movie.status === "failed"
+                      ? movie.errorMessage ?? "映画の生成に失敗しました。"
+                      : `映画を生成しています（${movie.status}）。`}
                 </div>
               )}
             </div>
@@ -347,19 +493,16 @@ export default function Home() {
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs uppercase tracking-[0.22em] text-slate-400">章構成</p>
                 <ul className="mt-4 space-y-3">
-                  {[
-                    "最初に強く残った場面",
-                    "繰り返される人物と気持ち",
-                    "最後に見たい時間帯",
-                    "再度訪れたい場所",
-                  ].map((chapter, index) => (
-                    <li key={chapter} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2">
+                  {(movie?.movie?.scenes ?? []).map((chapter, index) => (
+                    <li key={chapter.order} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2">
                       <div>
-                        <p className="text-sm font-medium text-white">{chapter}</p>
+                        <p className="text-sm font-medium text-white">{chapter.source}</p>
+                        <p className="mt-1 text-xs text-slate-300">{chapter.narration}</p>
                       </div>
-                      <span className="text-xs text-slate-300">{index + 1}</span>
+                      <span className="text-xs text-slate-300">{chapter.order ?? index + 1}</span>
                     </li>
                   ))}
+                  {!movie?.movie && <li className="text-sm text-slate-400">生成後に章構成が表示されます。</li>}
                 </ul>
               </div>
 
