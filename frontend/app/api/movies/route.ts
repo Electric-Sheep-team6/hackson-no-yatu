@@ -4,6 +4,7 @@ import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
 import { generateMovieScript } from "@/lib/ai/generateMovieScript";
 import { composeMovie } from "@/lib/ai/video/composeMovie";
 import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
+import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -69,7 +70,10 @@ async function processMovieGeneration(
       const generated = await geminiVideoGenerator.generateScene({
         prompt: scene.videoPrompt,
         duration: scene.duration,
-        referenceImageUrls: scene.referencePhotoUrls,
+        referenceImageUrls: selectReferenceImageUrls(
+          scene.referencePhotoUrls,
+          photoUrls,
+        ),
       });
       if (!generated.videoData) throw new Error("動画データがありません");
       const path = `${userId}/${movieId}/scenes/${scene.order}.mp4`;
