@@ -23,14 +23,17 @@ describe("POST /api/obsessions", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("RLSでINSERTできない利用者クライアントではなく管理クライアントで保存する", async () => {
+    const diaryLimit = vi.fn().mockResolvedValue({
+      data: [{ content: "雨上がりの駅まで歩いた" }],
+      error: null,
+    });
+    const photoLimit = vi.fn().mockResolvedValue({ data: [], error: null });
     const userFrom = vi.fn((table: string) => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          order: vi.fn().mockResolvedValue(
-            table === "diaries"
-              ? { data: [{ content: "雨上がりの駅まで歩いた" }], error: null }
-              : { data: [], error: null },
-          ),
+          order: vi.fn(() => ({
+            limit: table === "diaries" ? diaryLimit : photoLimit,
+          })),
         })),
       })),
     }));
@@ -74,5 +77,7 @@ describe("POST /api/obsessions", () => {
       expect.objectContaining({ user_id: "user-1" }),
     );
     expect(userFrom).not.toHaveBeenCalledWith("obsessions");
+    expect(diaryLimit).toHaveBeenCalledWith(50);
+    expect(photoLimit).toHaveBeenCalledWith(12);
   });
 });

@@ -22,12 +22,14 @@ export async function POST() {
         .from("diaries")
         .select("content")
         .eq("user_id", user.id)
-        .order("created_at", { ascending: true }),
+        .order("created_at", { ascending: false })
+        .limit(50),
       supabase
         .from("photos")
         .select("storage_path")
         .eq("user_id", user.id)
-        .order("created_at", { ascending: true }),
+        .order("created_at", { ascending: false })
+        .limit(12),
     ]);
 
     if (diariesResult.error) throw diariesResult.error;
@@ -52,7 +54,9 @@ export async function POST() {
     });
 
     const analysis = await analyzeObsession({
-      diaryTexts: diariesResult.data.map(({ content }) => content),
+      diaryTexts: [...diariesResult.data]
+        .reverse()
+        .map(({ content }) => content),
       photoUrls,
     });
     const admin = createAdminClient();
