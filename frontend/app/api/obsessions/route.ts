@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { analyzeObsession } from "@/lib/ai/analyzeObsession";
 import { ApiError, errorResponse } from "@/lib/apiError";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST() {
@@ -54,7 +55,8 @@ export async function POST() {
       diaryTexts: diariesResult.data.map(({ content }) => content),
       photoUrls,
     });
-    const { data, error } = await supabase
+    const admin = createAdminClient();
+    const { data, error } = await admin
       .from("obsessions")
       .insert({
         user_id: user.id,
