@@ -33,12 +33,14 @@ export async function analyzeObsession(
   input: AnalyzeObsessionInput,
 ): Promise<ObsessionAnalysis> {
   let remainingDiaryChars = 50_000;
-  const diaryTexts = input.diaryTexts.flatMap((text) => {
-    if (remainingDiaryChars <= 0) return [];
+  const diaryTexts: string[] = [];
+  for (let index = input.diaryTexts.length - 1; index >= 0; index -= 1) {
+    if (remainingDiaryChars <= 0) break;
+    const text = input.diaryTexts[index];
     const excerpt = text.slice(0, remainingDiaryChars);
     remainingDiaryChars -= excerpt.length;
-    return [excerpt];
-  });
+    diaryTexts.unshift(excerpt);
+  }
   const response = await createOpenAIClient().responses.parse({
     model: AI_TEXT_MODEL,
     store: false,
