@@ -105,4 +105,31 @@ describe("AI generation", () => {
       "https://example.com/allowed.jpg",
     ]);
   });
+
+  it("映画構成のシーン番号を配列順の連番へ正規化する", async () => {
+    responsesParse.mockResolvedValue({
+      output_parsed: {
+        title: "雨のあと",
+        logline: "帰り道に見つけた静かな安心。",
+        synopsis: "雨上がりの街を歩く短編映画です。",
+        visualStyle: "soft blue cinematic light",
+        bgm: "quiet piano",
+        scenes: ["駅前", "路地", "自宅"].map((source) => ({
+          order: 1,
+          source,
+          duration: 5,
+          narration: `${source}を歩く。`,
+          videoPrompt: "A single continuous cinematic shot.",
+          referencePhotoUrls: [],
+        })),
+      },
+    });
+
+    const result = await generateMovieScript({
+      obsession: analysis,
+      photoUrls: [],
+    });
+
+    expect(result.scenes.map(({ order }) => order)).toEqual([1, 2, 3]);
+  });
 });

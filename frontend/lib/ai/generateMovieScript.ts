@@ -58,8 +58,9 @@ export async function generateMovieScript(
   const allowedPhotoUrls = new Set(input.photoUrls);
   return {
     ...response.output_parsed,
-    scenes: response.output_parsed.scenes.map((scene) => ({
+    scenes: response.output_parsed.scenes.map((scene, index) => ({
       ...scene,
+      order: index + 1,
       referencePhotoUrls: scene.referencePhotoUrls.filter((url) =>
         allowedPhotoUrls.has(url),
       ),
