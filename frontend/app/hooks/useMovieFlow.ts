@@ -479,21 +479,36 @@ export function useMovieFlow() {
   }, [busy, obsession, showMessage]);
 
   useEffect(() => {
-    try {
-      void createClient()
-        .auth.getUser()
-        .then(({ data }) => {
-          setUserEmail(data.user?.email ?? null);
+    let cancelled = false;
 
-          if (data.user) {
-            setPendingConfirmationEmail(null);
-            void refreshLibrary();
-          }
-        });
-    } catch {
-      // env is validated when used
-    }
-  }, [refreshLibrary]);
+    const restoreSession = async () => {
+      try {
+        const { data } = await createClient().auth.getUser();
+        if (cancelled) return;
+
+        setUserEmail(data.user?.email ?? null);
+
+        if (data.user) {
+          setPendingConfirmationEmail(null);
+          await refreshLibrary();
+        }
+      } catch {
+        if (!cancelled) {
+          setUserEmail(null);
+          showMessage(
+            "ログイン状態を確認できませんでした。通信環境を確認してください。",
+            "error",
+            "auth",
+          );
+        }
+      }
+    };
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshLibrary, showMessage]);
 
   useEffect(() => {
     if (!movie || ["completed", "failed"].includes(movie.status)) return;

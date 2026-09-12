@@ -136,6 +136,25 @@ describe("useMovieFlow", () => {
     expect(result.current.photoCount).toBe(0);
   });
 
+  it("セッション確認の通信失敗を未処理にせず画面へ通知する", async () => {
+    createClientMock.mockReturnValue({
+      auth: {
+        getUser: vi.fn().mockRejectedValue(new Error("network unavailable")),
+      },
+    });
+
+    const { result } = renderHook(() => useMovieFlow());
+
+    await waitFor(() => {
+      expect(result.current.message).toEqual({
+        text: "ログイン状態を確認できませんでした。通信環境を確認してください。",
+        tone: "error",
+        area: "auth",
+      });
+    });
+    expect(result.current.userEmail).toBeNull();
+  });
+
   it("日記と画像の投稿から偏愛分析、映画完成まで画面操作で実行する", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
