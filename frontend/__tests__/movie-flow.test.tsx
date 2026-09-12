@@ -46,6 +46,7 @@ describe("useMovieFlow", () => {
     cleanup();
     vi.useRealTimers();
     global.fetch = originalFetch;
+    window.history.replaceState(null, "", "/");
   });
 
   it("ログイン状態の復元時に最新の偏愛と完成済み映画も復元する", async () => {
@@ -153,6 +154,30 @@ describe("useMovieFlow", () => {
       });
     });
     expect(result.current.userEmail).toBeNull();
+  });
+
+  it.each([
+    [
+      "missing_code",
+      "認証リンクが不正です。確認メールからもう一度開いてください。",
+    ],
+    [
+      "confirmation_failed",
+      "メールアドレスを確認できませんでした。リンクの期限を確認してください。",
+    ],
+  ])("認証コールバックの%sを表示してURLから除去する", async (code, text) => {
+    window.history.replaceState(null, "", `/?auth_error=${code}`);
+    createClientMock.mockReturnValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
+      },
+    });
+
+    const { result } = renderHook(() => useMovieFlow());
+
+    await waitFor(() => expect(result.current.message?.text).toBe(text));
+    expect(result.current.message).toMatchObject({ tone: "error", area: "auth" });
+    expect(window.location.search).toBe("");
   });
 
   it("ログアウト後に遅延した旧ユーザーのライブラリを再表示しない", async () => {

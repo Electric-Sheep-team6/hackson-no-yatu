@@ -31,6 +31,12 @@ type Movie = {
 
 type Busy = "auth" | "diary" | "upload" | "analysis" | "movie" | null;
 
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  missing_code: "認証リンクが不正です。確認メールからもう一度開いてください。",
+  confirmation_failed:
+    "メールアドレスを確認できませんでした。リンクの期限を確認してください。",
+};
+
 export type MessageTone = "success" | "error" | "info";
 export type MessageArea = "auth" | "library" | "analysis" | "movie";
 export type FlowMessage = {
@@ -86,6 +92,32 @@ export function useMovieFlow() {
       URL.revokeObjectURL(photo.previewUrl);
     }
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    if (!authError) return;
+
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      showMessage(
+        AUTH_ERROR_MESSAGES[authError] ?? "認証を完了できませんでした。",
+        "error",
+        "auth",
+      );
+    });
+    params.delete("auth_error");
+    const search = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`,
+    );
+    return () => {
+      active = false;
+    };
+  }, [showMessage]);
 
   const clearUserData = useCallback(() => {
     libraryRefreshVersionRef.current += 1;
