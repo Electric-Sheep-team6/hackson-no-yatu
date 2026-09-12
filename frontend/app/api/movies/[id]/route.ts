@@ -60,6 +60,6 @@ export async function GET(_request: Request, context: RouteContext) {
       movie: movie.movie_json as MovieScript | null,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "GET /api/movies/[id]" });
   }
 }

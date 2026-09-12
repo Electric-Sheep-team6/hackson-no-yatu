@@ -56,7 +56,18 @@ describe("AI generation", () => {
     global.fetch = originalFetch;
   });
 
-  it("未設定時はOpenAIで日記と最大26枚の写真を分析する", async () => {
+  it("未設定時はGeminiで分析する(Geminiに一本化済み)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(geminiResponse(analysis)) as typeof fetch;
+
+    await expect(analyzeObsession({ diaryTexts: ["駅まで歩いた"], photoUrls: [] })).resolves.toEqual(analysis);
+
+    expect(responsesParse).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalled();
+  });
+
+  it("AI_TEXT_PROVIDER=openaiなら日記と最大26枚の写真を分析する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({ output_parsed: analysis });
     const photoUrls = Array.from({ length: 27 }, (_, index) => `https://example.com/${index}.jpg`);
 
@@ -95,6 +106,7 @@ describe("AI generation", () => {
   });
 
   it("偏愛分析へ送る日記本文を合計5万文字に制限する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({ output_parsed: analysis });
     await analyzeObsession({ diaryTexts: ["あ".repeat(50_000), "送信されない日記"], photoUrls: [] });
     const inputText = responsesParse.mock.calls[0][0].input[0].content[0].text as string;
@@ -103,6 +115,7 @@ describe("AI generation", () => {
   });
 
   it("OpenAIでホログラム向けstructured movie scriptを生成する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({ output_parsed: movie });
     const result = await generateMovieScript({ obsession: analysis, photoUrls: ["https://example.com/1.jpg"] });
 
@@ -128,6 +141,7 @@ describe("AI generation", () => {
   });
 
   it("映画構成が返した未入力の参照 URL を除外する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({
       output_parsed: {
         title: "雨のあと",

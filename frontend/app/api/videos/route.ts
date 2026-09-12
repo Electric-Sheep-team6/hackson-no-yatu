@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       createdAt: data.created_at,
     }, { status: 201 });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "POST /api/videos" });
   }
 }
 
@@ -47,6 +47,6 @@ export async function GET() {
       createdAt: video.created_at,
     })) });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "GET /api/videos" });
   }
 }

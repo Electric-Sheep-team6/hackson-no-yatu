@@ -92,7 +92,7 @@ export async function POST() {
       { status: 201 },
     );
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "POST /api/obsessions" });
   }
 }
 
@@ -125,6 +125,6 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "GET /api/obsessions" });
   }
 }

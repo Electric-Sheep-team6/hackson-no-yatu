@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 
 const AI_PROVIDER_OPENAI = "openai";
 const AI_PROVIDER_GEMINI = "gemini";
-const DEFAULT_AI_TEXT_PROVIDER = AI_PROVIDER_OPENAI;
+// テキスト生成は Gemini に一本化済み。OpenAI は AI_TEXT_PROVIDER=openai を
+// 明示した場合のみのオプトインパスとして残している。
+const DEFAULT_AI_TEXT_PROVIDER = AI_PROVIDER_GEMINI;
 const UNHEALTHY_STATUS = 503;
 
 const SYSTEM_FFMPEG_PATHS = [

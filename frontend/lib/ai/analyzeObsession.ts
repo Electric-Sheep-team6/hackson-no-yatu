@@ -66,7 +66,8 @@ function truncateDiaryTexts(texts: string[]): string[] {
 }
 
 function getProvider(): "openai" | "gemini" {
-  const provider = process.env.AI_TEXT_PROVIDER ?? "openai";
+  // テキスト生成は Gemini に一本化済み。OpenAI は明示的に選択した場合のみ使う。
+  const provider = process.env.AI_TEXT_PROVIDER ?? "gemini";
   if (provider !== "openai" && provider !== "gemini") throw new Error("AI_TEXT_PROVIDER の値が不正です");
   return provider;
 }
