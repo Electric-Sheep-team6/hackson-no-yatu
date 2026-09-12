@@ -7,9 +7,10 @@ import { execFile } from "node:child_process";
 import bundledFfmpegPath from "ffmpeg-static";
 
 const execFileAsync = promisify(execFile);
+const SYSTEM_FFMPEG_PATHS = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"];
 
 async function resolveFfmpegPath() {
-  const candidates = [process.env.FFMPEG_PATH, bundledFfmpegPath, "/usr/bin/ffmpeg"];
+  const candidates = [process.env.FFMPEG_PATH, bundledFfmpegPath, ...SYSTEM_FFMPEG_PATHS];
   for (const candidate of candidates) {
     if (!candidate) continue;
     try {

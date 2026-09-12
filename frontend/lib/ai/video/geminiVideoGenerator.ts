@@ -1,71 +1,87 @@
+import { z } from "zod";
+
+import { loadReferenceImage, type ReferenceImage } from "../referenceImage";
+import { prepareHologramVideo } from "./prepareHologramVideo";
 import type { GenerateSceneInput, GenerateSceneResult, VideoGenerator } from "./VideoGenerator";
 
 const GEMINI_MODEL = "gemini-omni-1.1-flash";
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
-const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_REFERENCE_IMAGES = 3;
+const REQUEST_TIMEOUT_MS = 120_000;
 
-type GeminiInteraction = { id?: string; output_video?: { data?: string }; error?: { message?: string } };
+const videoContentSchema = z.object({
+  type: z.literal("video").optional(),
+  data: z.string().min(1),
+});
 
-async function readReferenceImage(response: Response): Promise<Buffer> {
-  const declaredSize = Number(response.headers.get("content-length") ?? 0);
-  if (declaredSize > MAX_REFERENCE_IMAGE_BYTES) {
-    throw new Error("参照画像が大きすぎます");
-  }
+const interactionSchema = z.object({
+  id: z.string().min(1),
+  output_video: videoContentSchema.optional(),
+  steps: z.array(z.object({
+    type: z.string(),
+    content: z.array(z.unknown()).optional(),
+  })).optional(),
+});
 
-  if (!response.body) throw new Error("参照画像を読み取れませんでした");
+type GeminiInteraction = z.infer<typeof interactionSchema>;
 
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    totalBytes += value.byteLength;
-    if (totalBytes > MAX_REFERENCE_IMAGE_BYTES) {
-      await reader.cancel();
-      throw new Error("参照画像が大きすぎます");
-    }
-    chunks.push(value);
-  }
-
-  return Buffer.concat(chunks, totalBytes);
+function getApiKey(): string {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
+  return apiKey;
 }
 
-async function toImageInput(url: string) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-  if (!response.ok) throw new Error("参照画像を取得できませんでした");
-  const contentType = response.headers.get("content-type")?.split(";")[0] ?? "";
-  if (!contentType.startsWith("image/")) {
-    throw new Error("参照ファイルが画像ではありません");
-  }
-  const image = await readReferenceImage(response);
-  return {
-    type: "image" as const,
-    data: image.toString("base64"),
-    mime_type: contentType,
-  };
+function toImageInput(image: ReferenceImage) {
+  return { type: "image" as const, data: image.data, mime_type: image.mimeType };
+}
+
+function buildTimedPrompt(prompt: string, duration: number): string {
+  return `[0-${duration}s] ${prompt}`;
+}
+
+function findStepVideo(interaction: GeminiInteraction) {
+  const content = interaction.steps
+    ?.filter((step) => step.type === "model_output")
+    .flatMap((step) => step.content ?? [])
+    .findLast((item) => videoContentSchema.safeParse(item).success);
+  const parsed = videoContentSchema.safeParse(content);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function readVideoData(interaction: GeminiInteraction): Uint8Array {
+  const video = interaction.output_video ?? findStepVideo(interaction);
+  if (!video) throw new Error("Gemini から動画データが返されませんでした");
+  return new Uint8Array(Buffer.from(video.data, "base64"));
 }
 
 export class GeminiVideoGenerator implements VideoGenerator {
   async generateScene(input: GenerateSceneInput): Promise<GenerateSceneResult> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-    const images = await Promise.all(input.referenceImageUrls.slice(0, 3).map(toImageInput));
+    const references = await Promise.all(
+      input.referenceImageUrls.slice(0, MAX_REFERENCE_IMAGES).map(loadReferenceImage),
+    );
     const response = await fetch(INTERACTIONS_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": getApiKey() },
       body: JSON.stringify({
         model: GEMINI_MODEL,
-        input: [...images, { type: "text", text: input.prompt }],
+        input: [...references.map(toImageInput), {
+          type: "text",
+          text: buildTimedPrompt(input.prompt, input.duration),
+        }],
+        generation_config: {
+          video_config: {
+            task: references.length > 0 ? "reference_to_video" : "text_to_video",
+          },
+        },
         response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p" },
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    const interaction = await response.json() as GeminiInteraction;
-    if (!response.ok) throw new Error(interaction.error?.message ?? "Gemini 動画生成に失敗しました");
-    if (!interaction.id || !interaction.output_video?.data) throw new Error("Gemini から動画データが返されませんでした");
-    return { providerJobId: interaction.id, videoData: new Uint8Array(Buffer.from(interaction.output_video.data, "base64")) };
+    if (!response.ok) throw new Error("Gemini 動画生成に失敗しました");
+    const parsed = interactionSchema.safeParse(await response.json());
+    if (!parsed.success) throw new Error("Gemini 動画生成の応答を読み取れませんでした");
+    const videoData = await prepareHologramVideo(readVideoData(parsed.data));
+    return { providerJobId: parsed.data.id, videoData };
   }
 }
 

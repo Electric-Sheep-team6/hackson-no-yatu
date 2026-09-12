@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,9 +7,12 @@ import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { composeMovie } from "@/lib/ai/video/composeMovie";
+import { prepareHologramVideo } from "@/lib/ai/video/prepareHologramVideo";
 
 const execFileAsync = promisify(execFile);
-const canUseSystemFfmpeg = existsSync("/usr/bin/ffmpeg");
+const systemFfmpegPath = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"].find(existsSync);
+const systemFfprobePath = ["/opt/homebrew/bin/ffprobe", "/usr/bin/ffprobe"].find(existsSync);
+const canUseSystemFfmpeg = Boolean(systemFfmpegPath);
 
 describe.skipIf(!canUseSystemFfmpeg)("composeMovie", () => {
   it("concatenates scene MP4s into a playable MP4", async () => {
@@ -17,14 +20,40 @@ describe.skipIf(!canUseSystemFfmpeg)("composeMovie", () => {
     try {
       const first = join(directory, "first.mp4");
       const second = join(directory, "second.mp4");
+      if (!systemFfmpegPath) throw new Error("FFmpeg is unavailable");
       for (const [path, color] of [[first, "red"], [second, "blue"]] as const) {
-        await execFileAsync("/usr/bin/ffmpeg", ["-y", "-f", "lavfi", "-i", `color=c=${color}:s=32x32:d=0.1`, "-pix_fmt", "yuv420p", path]);
+        await execFileAsync(systemFfmpegPath, ["-y", "-f", "lavfi", "-i", `color=c=${color}:s=32x32:d=0.1`, "-pix_fmt", "yuv420p", path]);
       }
 
       const movie = await composeMovie([new Uint8Array(await readFile(first)), new Uint8Array(await readFile(second))]);
 
       expect(movie.byteLength).toBeGreaterThan(100);
       expect(Buffer.from(movie.subarray(4, 8)).toString()).toBe("ftyp");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(!systemFfmpegPath || !systemFfprobePath)("prepareHologramVideo", () => {
+  it("16:9動画を720x720の正方形へ中央クロップする", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "last-screen-square-test-"));
+    try {
+      if (!systemFfmpegPath || !systemFfprobePath) throw new Error("FFmpeg is unavailable");
+      const sourcePath = join(directory, "source.mp4");
+      const outputPath = join(directory, "output.mp4");
+      await execFileAsync(systemFfmpegPath, [
+        "-y", "-f", "lavfi", "-i", "color=c=black:s=1280x720:d=1",
+        "-pix_fmt", "yuv420p", sourcePath,
+      ]);
+
+      const output = await prepareHologramVideo(new Uint8Array(await readFile(sourcePath)));
+      await writeFile(outputPath, output);
+      const { stdout } = await execFileAsync(systemFfprobePath, [
+        "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", outputPath,
+      ]);
+      expect(stdout.trim()).toBe("720x720");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
