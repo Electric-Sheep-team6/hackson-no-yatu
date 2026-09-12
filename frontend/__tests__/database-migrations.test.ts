@@ -176,4 +176,19 @@ describe("database migrations", () => {
     expect(migration).toContain("diaries.user_id = auth.uid()");
   });
 
+  it("Storageへ直接送信しても写真のサイズ・MIME制限を迂回できない", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0013_restrict_photo_uploads.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("update storage.buckets");
+    expect(migration).toContain("file_size_limit = 10485760");
+    expect(migration).toContain("allowed_mime_types = array['image/*']::text[]");
+    expect(migration).toContain("where id = 'photos'");
+  });
+
 });
