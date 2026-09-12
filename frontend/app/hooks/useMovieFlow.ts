@@ -97,36 +97,37 @@ export function useMovieFlow() {
   }, [revokePhotoPreviews]);
 
   const refreshLibrary = useCallback(async () => {
+    const fetchSafely = (path: string) => fetch(path).catch(() => null);
     const [
       diariesResponse,
       photosResponse,
       obsessionsResponse,
       moviesResponse,
     ] = await Promise.all([
-      fetch("/api/diaries"),
-      fetch("/api/photos"),
-      fetch("/api/obsessions"),
-      fetch("/api/movies"),
+      fetchSafely("/api/diaries"),
+      fetchSafely("/api/photos"),
+      fetchSafely("/api/obsessions"),
+      fetchSafely("/api/movies"),
     ]);
 
-    if (diariesResponse.ok) {
+    if (diariesResponse?.ok) {
       setDiaries(((await diariesResponse.json()) as { items: Diary[] }).items);
     }
 
-    if (photosResponse.ok) {
+    if (photosResponse?.ok) {
       setPhotoCount(
         ((await photosResponse.json()) as { items: unknown[] }).items.length,
       );
     }
 
-    if (obsessionsResponse.ok) {
+    if (obsessionsResponse?.ok) {
       const { items } = (await obsessionsResponse.json()) as {
         items: Obsession[];
       };
       setObsession(items[0] ?? null);
     }
 
-    if (moviesResponse.ok) {
+    if (moviesResponse?.ok) {
       const { items } = (await moviesResponse.json()) as {
         items: { id: string; status: string }[];
       };
@@ -135,8 +136,8 @@ export function useMovieFlow() {
       if (!latestMovie) {
         setMovie(null);
       } else {
-        const movieResponse = await fetch(`/api/movies/${latestMovie.id}`);
-        if (movieResponse.ok) {
+        const movieResponse = await fetchSafely(`/api/movies/${latestMovie.id}`);
+        if (movieResponse?.ok) {
           const restoredMovie = (await movieResponse.json()) as Movie;
           setMovie(restoredMovie);
           if (!["completed", "failed"].includes(restoredMovie.status)) {

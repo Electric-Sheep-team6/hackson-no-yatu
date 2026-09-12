@@ -98,6 +98,44 @@ describe("useMovieFlow", () => {
     expect(global.fetch).toHaveBeenCalledWith("/api/movies/movie-1");
   });
 
+  it("一部の取得が通信失敗しても残りのライブラリを復元する", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const path = typeof input === "string" ? input : input.toString();
+      if (path === "/api/photos") throw new Error("network unavailable");
+      if (path === "/api/diaries") {
+        return Response.json({
+          items: [
+            {
+              id: "diary-1",
+              content: "復元された日記",
+              createdAt: "2026-09-12T00:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (path === "/api/obsessions") {
+        return Response.json({
+          items: [
+            {
+              id: "obsession-1",
+              title: "復元された偏愛",
+              reason: "日記に繰り返し現れるため",
+            },
+          ],
+        });
+      }
+      return Response.json({ items: [] });
+    }) as typeof fetch;
+
+    const { result } = renderHook(() => useMovieFlow());
+
+    await waitFor(() => {
+      expect(result.current.diaries[0]?.id).toBe("diary-1");
+      expect(result.current.obsession?.id).toBe("obsession-1");
+    });
+    expect(result.current.photoCount).toBe(0);
+  });
+
   it("日記と画像の投稿から偏愛分析、映画完成まで画面操作で実行する", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
