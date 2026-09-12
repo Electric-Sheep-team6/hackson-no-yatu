@@ -24,10 +24,20 @@ describe("POST /api/obsessions", () => {
 
   it("RLSでINSERTできない利用者クライアントではなく管理クライアントで保存する", async () => {
     const diaryLimit = vi.fn().mockResolvedValue({
-      data: [{ content: "雨上がりの駅まで歩いた" }],
+      data: [
+        { content: "新しい日記" },
+        { content: "古い日記" },
+      ],
       error: null,
     });
-    const photoLimit = vi.fn().mockResolvedValue({ data: [], error: null });
+    const photoLimit = vi.fn().mockResolvedValue({
+      data: [{ storage_path: "user-1/night.jpg" }],
+      error: null,
+    });
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: "https://storage.example.com/signed-night.jpg" },
+      error: null,
+    });
     const userFrom = vi.fn((table: string) => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
@@ -45,7 +55,7 @@ describe("POST /api/obsessions", () => {
         }),
       },
       from: userFrom,
-      storage: { from: vi.fn() },
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
     });
 
     analyzeObsessionMock.mockResolvedValue({
@@ -84,6 +94,11 @@ describe("POST /api/obsessions", () => {
     expect(userFrom).not.toHaveBeenCalledWith("obsessions");
     expect(diaryLimit).toHaveBeenCalledWith(50);
     expect(photoLimit).toHaveBeenCalledWith(12);
+    expect(createSignedUrl).toHaveBeenCalledWith("user-1/night.jpg", 3600);
+    expect(analyzeObsessionMock).toHaveBeenCalledWith({
+      diaryTexts: ["古い日記", "新しい日記"],
+      photoUrls: ["https://storage.example.com/signed-night.jpg"],
+    });
   });
 
   it("24時間の上限到達時はAIを呼び出さず429を返す", async () => {

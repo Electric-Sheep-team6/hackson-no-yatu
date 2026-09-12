@@ -1,6 +1,13 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MovieApp } from "@/app/components/MovieApp";
 import { useMovieFlow } from "@/app/hooks/useMovieFlow";
 
 const { createClientMock } = vi.hoisted(() => ({
@@ -14,13 +21,19 @@ vi.mock("@/lib/supabase/client", () => ({
 const originalFetch = global.fetch;
 
 describe("useMovieFlow", () => {
+  const uploadMock = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    uploadMock.mockResolvedValue({ error: null });
     createClientMock.mockReturnValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
           data: { user: { id: "user-1", email: "saku@example.com" } },
         }),
+      },
+      storage: {
+        from: vi.fn(() => ({ upload: uploadMock })),
       },
     });
   });
@@ -77,5 +90,145 @@ describe("useMovieFlow", () => {
       "https://example.com/movie.mp4",
     );
     expect(global.fetch).toHaveBeenCalledWith("/api/movies/movie-1");
+  });
+
+  it("日記と画像の投稿から偏愛分析、映画完成まで画面操作で実行する", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = typeof input === "string" ? input : input.toString();
+        const method = init?.method ?? "GET";
+
+        if (method === "GET" && path === "/api/diaries") {
+          return Response.json({ items: [] });
+        }
+        if (method === "GET" && path === "/api/photos") {
+          return Response.json({ items: [] });
+        }
+        if (method === "GET" && path === "/api/obsessions") {
+          return Response.json({ items: [] });
+        }
+        if (method === "GET" && path === "/api/movies") {
+          return Response.json({ items: [] });
+        }
+        if (method === "POST" && path === "/api/diaries") {
+          return Response.json(
+            {
+              id: "diary-1",
+              content: "雨上がりの夜道を歩いた",
+              createdAt: "2026-09-12T00:00:00.000Z",
+            },
+            { status: 201 },
+          );
+        }
+        if (method === "POST" && path === "/api/photos") {
+          return Response.json({ id: "photo-1" }, { status: 201 });
+        }
+        if (method === "POST" && path === "/api/obsessions") {
+          return Response.json(
+            {
+              id: "obsession-1",
+              title: "雨上がりの夜道",
+              reason: "日記と写真に繰り返し現れるため",
+            },
+            { status: 201 },
+          );
+        }
+        if (method === "POST" && path === "/api/movies") {
+          return Response.json(
+            { id: "movie-1", status: "pending" },
+            { status: 201 },
+          );
+        }
+        if (method === "GET" && path === "/api/movies/movie-1") {
+          return Response.json({
+            id: "movie-1",
+            status: "completed",
+            errorMessage: null,
+            videoUrl: "https://example.com/movie.mp4",
+            movie: {
+              title: "雨上がりの夜道",
+              scenes: [
+                { order: 1, source: "夜道", narration: "雨が上がる。" },
+              ],
+            },
+          });
+        }
+
+        return Response.json(
+          { message: `Unexpected request: ${method} ${path}` },
+          { status: 500 },
+        );
+      },
+    );
+    global.fetch = fetchMock as typeof fetch;
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:photo-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const { container } = render(<MovieApp />);
+
+    await screen.findByText("saku@example.com");
+
+    fireEvent.change(screen.getByLabelText("新しい日記"), {
+      target: { value: "雨上がりの夜道を歩いた" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "日記を追加" }));
+    await screen.findByText("雨上がりの夜道を歩いた");
+
+    const photoInput = container.querySelector<HTMLInputElement>(
+      'input[type="file"]',
+    );
+    expect(photoInput).not.toBeNull();
+    const photo = new File([new Uint8Array([1, 2, 3])], "night.jpg", {
+      type: "image/jpeg",
+    });
+    fireEvent.change(photoInput!, { target: { files: [photo] } });
+    await screen.findByAltText("night.jpg");
+
+    fireEvent.click(screen.getByRole("button", { name: "偏愛を分析" }));
+    await screen.findByRole("heading", { name: "雨上がりの夜道" });
+
+    fireEvent.click(screen.getByRole("button", { name: "映画を生成" }));
+    await waitFor(
+      () => {
+        expect(screen.getByText("映画が完成しました。")).toBeDefined();
+      },
+      { timeout: 3_000 },
+    );
+
+    const diaryRequest = fetchMock.mock.calls.find(
+      ([path, init]) => path === "/api/diaries" && init?.method === "POST",
+    );
+    expect(JSON.parse(diaryRequest?.[1]?.body as string)).toEqual({
+      content: "雨上がりの夜道を歩いた",
+    });
+
+    expect(uploadMock).toHaveBeenCalledWith(
+      expect.stringMatching(/^user-1\/[0-9a-f-]+\.jpg$/),
+      photo,
+      { contentType: "image/jpeg" },
+    );
+    const uploadedStoragePath = uploadMock.mock.calls[0][0] as string;
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/photos",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ storagePath: uploadedStoragePath }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/obsessions",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/movies",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ obsessionId: "obsession-1" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/movies/movie-1");
+    expect(container.querySelector("video")?.getAttribute("src")).toBe(
+      "https://example.com/movie.mp4",
+    );
   });
 });
