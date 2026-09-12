@@ -4,6 +4,7 @@ import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
 import { generateMovieScript } from "@/lib/ai/generateMovieScript";
 import { composeMovie } from "@/lib/ai/video/composeMovie";
 import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
+import { formatMovieGenerationError } from "@/lib/ai/video/movieGenerationError";
 import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -21,6 +22,7 @@ async function processMovieGeneration(
   obsession: ObsessionAnalysis,
 ) {
   const admin = createAdminClient();
+  let stage: Parameters<typeof formatMovieGenerationError>[0] = "写真の準備";
 
   try {
     let result = await admin
@@ -30,6 +32,7 @@ async function processMovieGeneration(
       .eq("user_id", userId);
     if (result.error) throw result.error;
 
+    stage = "写真の準備";
     const photosResult = await admin
       .from("photos")
       .select("storage_path")
@@ -54,6 +57,7 @@ async function processMovieGeneration(
       .eq("user_id", userId);
     if (result.error) throw result.error;
 
+    stage = "映画構成の作成";
     const movie = await generateMovieScript({ obsession, photoUrls });
 
     result = await admin
@@ -70,6 +74,7 @@ async function processMovieGeneration(
     const generatedScenes: { order: number; path: string; providerJobId: string }[] = [];
     const sceneVideos: Uint8Array[] = [];
     for (const scene of movie.scenes) {
+      stage = "シーン動画の生成";
       const generated = await geminiVideoGenerator.generateScene({
         prompt: scene.videoPrompt,
         duration: scene.duration,
@@ -88,8 +93,10 @@ async function processMovieGeneration(
       sceneVideos.push(generated.videoData);
     }
 
+    stage = "映像の結合";
     const finalVideo = await composeMovie(sceneVideos);
     const finalPath = `${userId}/${movieId}.mp4`;
+    stage = "完成動画の保存";
     const { error: finalUploadError } = await admin.storage.from("movies").upload(
       finalPath,
       finalVideo,
@@ -110,12 +117,12 @@ async function processMovieGeneration(
       .eq("user_id", userId);
     if (result.error) throw result.error;
   } catch (error) {
-    console.error(error);
+    console.error("Movie generation failed", { movieId, userId, stage, error });
     const { error: updateError } = await admin
       .from("movies")
       .update({
         status: "failed",
-        error_message: "動画生成に失敗しました",
+        error_message: formatMovieGenerationError(stage, error),
         updated_at: new Date().toISOString(),
       })
       .eq("id", movieId)

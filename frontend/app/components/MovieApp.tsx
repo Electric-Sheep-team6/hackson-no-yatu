@@ -333,7 +333,9 @@ export function MovieApp() {
           ) : (
             <div className="mt-6 flex aspect-video items-center justify-center rounded-2xl border border-white/10 bg-slate-950 text-sm text-slate-400">
               {flow.movie
-                ? `生成状態: ${flow.movie.status}`
+                ? flow.movie.status === "failed"
+                  ? flow.movie.errorMessage ?? "動画生成に失敗しました。"
+                  : `生成状態: ${flow.movie.status}`
                 : "映画を生成すると、ここで再生できます。"}
             </div>
           )}
