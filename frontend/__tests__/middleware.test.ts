@@ -9,7 +9,7 @@ vi.mock("@supabase/ssr", () => ({
   createServerClient: createServerClientMock,
 }));
 
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 
 describe("session refresh middleware", () => {
   beforeEach(() => {
@@ -46,7 +46,7 @@ describe("session refresh middleware", () => {
     const request = new NextRequest("https://app.example/api/diaries", {
       headers: { cookie: "sb-session=stale-session" },
     });
-    const response = await middleware(request);
+    const response = await proxy(request);
 
     expect(request.cookies.get("sb-session")?.value).toBe("fresh-session");
     expect(response.cookies.get("sb-session")?.value).toBe("fresh-session");
