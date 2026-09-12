@@ -291,4 +291,3 @@ implements VideoGenerator {
 
 export const geminiVideoGenerator =
   new GeminiVideoGenerator();
-

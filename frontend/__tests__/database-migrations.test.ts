@@ -1,9 +1,20 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 describe("database migrations", () => {
+  it("migration番号は重複せず、mainの動画用migrationの後に保護migrationを適用する", () => {
+    const migrations = readdirSync(
+      resolve(process.cwd(), "../supabase/migrations"),
+    ).filter((file) => file.endsWith(".sql"));
+    const versions = migrations.map((file) => file.split("_")[0]);
+
+    expect(new Set(versions).size).toBe(versions.length);
+    expect(migrations).toContain("0010_add_memory_videos.sql");
+    expect(migrations).toContain("0018_enforce_photo_storage_ownership.sql");
+  });
+
   it("SECURITY DEFINER関数のsearch_pathと実行権限を固定する", () => {
     const migration = readFileSync(
       resolve(

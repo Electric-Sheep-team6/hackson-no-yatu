@@ -81,7 +81,6 @@ export async function POST(request: Request) {
     return errorResponse(error, { route: "POST /api/movies" });
   }
 }
-
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -114,4 +113,3 @@ export async function GET() {
     return errorResponse(error, { route: "GET /api/movies" });
   }
 }
-

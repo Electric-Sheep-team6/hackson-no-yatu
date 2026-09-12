@@ -19,6 +19,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: routerReplaceMock, refresh: routerRefreshMock }),
 }));
 
+vi.mock("next/server", () => ({
+  connection: vi.fn(),
+}));
+
 import Home from "@/app/page";
 
 describe("Home", () => {

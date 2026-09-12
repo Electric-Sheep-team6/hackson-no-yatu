@@ -42,7 +42,7 @@ export function MovieApp({ userEmail }: { userEmail: string }) {
 
         <div className="user-session">
           <div><span>ログイン中</span><p>{userEmail}</p></div>
-          <button type="button" className="text-button" disabled={signingOut || disabled} onClick={() => void signOut()}>{signingOut ? "ログアウト中..." : "ログアウト"}</button>
+          <button type="button" className="text-button" disabled={signingOut || (disabled && flow.busy !== "movie")} onClick={() => void signOut()}>{signingOut ? "ログアウト中..." : "ログアウト"}</button>
           {authError && <p role="alert" className="session-error">{authError}</p>}
         </div>
       </header>

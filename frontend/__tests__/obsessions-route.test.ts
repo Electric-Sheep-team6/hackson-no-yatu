@@ -87,6 +87,11 @@ describe("POST /api/obsessions", () => {
   });
 
   it("24時間の上限到達時はAIを呼び出さず429を返す", async () => {
+    const diaryLimit = vi.fn().mockResolvedValue({
+      data: [{ content: "分析対象の日記" }],
+      error: null,
+    });
+    const photoLimit = vi.fn().mockResolvedValue({ data: [], error: null });
     createClientMock.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
@@ -94,6 +99,16 @@ describe("POST /api/obsessions", () => {
           error: null,
         }),
       },
+      from: vi.fn((table: string) => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            order: vi.fn(() => ({
+              limit: table === "diaries" ? diaryLimit : photoLimit,
+            })),
+          })),
+        })),
+      })),
+      storage: { from: vi.fn() },
     });
     createAdminClientMock.mockReturnValue({
       rpc: vi.fn().mockResolvedValue({ data: false, error: null }),

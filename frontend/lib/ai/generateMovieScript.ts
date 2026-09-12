@@ -49,7 +49,9 @@ const movieScriptSchema = z.object({
     duration: z.number().int().min(3).max(10),
     narration: z.string().min(1).max(300),
     videoPrompt: z.string().min(1).max(2_000),
-    referencePhotoUrls: z.array(z.string().url()).max(3),
+    // OpenAI Structured Outputs rejects JSON Schema's `uri` format. URLs are
+    // constrained to the signed input set by keepAllowedReferencePhotos().
+    referencePhotoUrls: z.array(z.string()).max(3),
   })).min(3).max(5),
 });
 

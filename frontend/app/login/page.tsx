@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 
 import { AuthPage } from "@/app/components/AuthPage";
 import { createClient } from "@/lib/supabase/server";
@@ -25,6 +26,7 @@ function safeNextPath(value: string | string[] | undefined) {
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
+  await connection();
   const supabase = await createClient();
   const {
     data: { user },

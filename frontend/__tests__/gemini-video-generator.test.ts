@@ -21,7 +21,6 @@ beforeEach(() => {
   vi.stubEnv("GEMINI_API_KEY", "test-key");
   prepareHologramVideo.mockClear();
 });
-
 afterEach(() => {
   global.fetch = originalFetch;
   vi.unstubAllEnvs();
@@ -151,4 +150,3 @@ describe("GeminiVideoGenerator", () => {
     })).rejects.toThrow("Gemini から動画データが返されませんでした");
   });
 });
-

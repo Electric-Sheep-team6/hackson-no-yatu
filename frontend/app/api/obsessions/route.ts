@@ -18,15 +18,6 @@ export async function POST() {
     }
 
     const admin = createAdminClient();
-    const { data: claimed, error: claimError } = await admin.rpc(
-      "claim_obsession_analysis",
-      { p_user_id: user.id },
-    );
-    if (claimError) throw claimError;
-    if (!claimed) {
-      throw new ApiError(429, "rate_limited", "偏愛分析は24時間に10回までです");
-    }
-
     const [diariesResult, photosResult] = await Promise.all([
       supabase
         .from("diaries")
@@ -58,10 +49,26 @@ export async function POST() {
         supabase.storage.from("photos").createSignedUrl(storage_path, 3600),
       ),
     );
-    const photoUrls = signedUrlResults.map(({ data, error }) => {
-      if (error || !data) throw error ?? new Error("Failed to sign photo URL");
-      return data.signedUrl;
-    });
+    const photoUrls = signedUrlResults.flatMap(({ data, error }) =>
+      error || !data ? [] : [data.signedUrl],
+    );
+
+    if (diariesResult.data.length === 0 && photoUrls.length === 0) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "分析に利用できる日記または写真がありません",
+      );
+    }
+
+    const { data: claimed, error: claimError } = await admin.rpc(
+      "claim_obsession_analysis",
+      { p_user_id: user.id },
+    );
+    if (claimError) throw claimError;
+    if (!claimed) {
+      throw new ApiError(429, "rate_limited", "偏愛分析は24時間に10回までです");
+    }
 
     const analysis = await analyzeObsession({
       diaryTexts: [...diariesResult.data]

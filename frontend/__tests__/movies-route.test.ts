@@ -91,7 +91,6 @@ beforeEach(() => {
   mocks.generateScene.mockResolvedValue({ providerJobId: "job-1", videoData: new Uint8Array([5]) });
   mocks.composeHybridMovie.mockResolvedValue(new Uint8Array([9]));
 });
-
 describe("hybrid movie generation", () => {
   it("Gemini動画生成を1回だけ呼び、上限10秒の非人物象徴カットを要求する", async () => {
     const { admin, updates } = createAdmin();
@@ -145,4 +144,3 @@ describe("hybrid movie generation", () => {
     expect(route.maxDuration).toBe(300);
   });
 });
-
