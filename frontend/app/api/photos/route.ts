@@ -36,7 +36,6 @@ export async function POST(request: Request) {
     const { data: photoExists, error: storageError } = await supabase.storage
       .from("photos")
       .exists(storagePath);
-    if (storageError) throw storageError;
     if (!photoExists) {
       throw new ApiError(
         400,
@@ -44,6 +43,7 @@ export async function POST(request: Request) {
         "アップロード済みの写真が見つかりません",
       );
     }
+    if (storageError) throw storageError;
 
     if (diaryId) {
       const { data: diary, error: diaryError } = await supabase

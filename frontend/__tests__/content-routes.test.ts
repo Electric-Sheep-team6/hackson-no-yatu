@@ -128,7 +128,10 @@ describe("日記・写真投稿API", () => {
 
   it("Storageに存在しない写真をメタデータへ登録しない", async () => {
     const from = vi.fn();
-    const exists = vi.fn().mockResolvedValue({ data: false, error: null });
+    const exists = vi.fn().mockResolvedValue({
+      data: false,
+      error: { status: 404, message: "Object not found" },
+    });
     createClientMock.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
