@@ -160,4 +160,20 @@ describe("database migrations", () => {
     );
   });
 
+  it("写真を他人の日記へ直接紐付けられない", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0012_enforce_photo_diary_ownership.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain('drop policy "insert own photos"');
+    expect(migration).toContain("user_id = auth.uid()");
+    expect(migration).toContain("diary_id is null");
+    expect(migration).toContain("from public.diaries");
+    expect(migration).toContain("diaries.user_id = auth.uid()");
+  });
+
 });
