@@ -20,7 +20,12 @@ export async function POST(request: Request) {
       await request.json(),
     );
 
-    if (storagePath.split("/")[0] !== user.id) {
+    const [ownerId, fileName, ...extraSegments] = storagePath.split("/");
+    if (
+      ownerId !== user.id ||
+      !fileName ||
+      extraSegments.length > 0
+    ) {
       throw new ApiError(
         403,
         "forbidden",

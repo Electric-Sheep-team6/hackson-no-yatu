@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createDiarySchema, emailSchema } from "@/lib/validation";
+import {
+  createDiarySchema,
+  createPhotoSchema,
+  emailSchema,
+} from "@/lib/validation";
 
 describe("emailSchema", () => {
   it("accepts a valid email address", () => {
@@ -23,5 +27,13 @@ describe("createDiarySchema", () => {
     expect(createDiarySchema.safeParse({ content: " \n\t " }).success).toBe(
       false,
     );
+  });
+});
+
+describe("createPhotoSchema", () => {
+  it("過大なStorageパスを拒否する", () => {
+    expect(
+      createPhotoSchema.safeParse({ storagePath: "a".repeat(1_025) }).success,
+    ).toBe(false);
   });
 });

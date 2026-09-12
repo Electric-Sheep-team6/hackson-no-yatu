@@ -7,7 +7,7 @@ export const createDiarySchema = z.object({
 });
 
 export const createPhotoSchema = z.object({
-  storagePath: z.string().min(1),
+  storagePath: z.string().min(1).max(1_024),
   diaryId: z.uuid().nullable().optional(),
 });
 

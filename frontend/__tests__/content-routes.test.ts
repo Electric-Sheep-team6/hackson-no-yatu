@@ -144,4 +144,31 @@ describe("日記・写真投稿API", () => {
     expect(response.status).toBe(403);
     expect(from).not.toHaveBeenCalled();
   });
+
+  it.each(["user-1", "user-1/", "user-1/folder/photo.jpg"])(
+    "不正なStorageパス %s は保存しない",
+    async (storagePath) => {
+      const from = vi.fn();
+      createClientMock.mockResolvedValue({
+        auth: {
+          getUser: vi.fn().mockResolvedValue({
+            data: { user: { id: "user-1" } },
+            error: null,
+          }),
+        },
+        from,
+      });
+
+      const response = await createPhoto(
+        new Request("http://localhost/api/photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ storagePath }),
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(from).not.toHaveBeenCalled();
+    },
+  );
 });
