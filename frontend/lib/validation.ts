@@ -1,6 +1,15 @@
 import { z } from "zod";
 
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+export const ALLOWED_PHOTO_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+export function isAllowedPhotoMimeType(value: string) {
+  return ALLOWED_PHOTO_MIME_TYPES.some((mimeType) => mimeType === value);
+}
 
 export const emailSchema = z.email();
 

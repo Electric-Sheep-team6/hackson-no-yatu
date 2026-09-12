@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createClient } from "@/lib/supabase/server";
-import { createPhotoSchema, MAX_PHOTO_BYTES } from "@/lib/validation";
+import {
+  createPhotoSchema,
+  isAllowedPhotoMimeType,
+  MAX_PHOTO_BYTES,
+} from "@/lib/validation";
 
 export async function POST(request: Request) {
   try {
@@ -45,8 +49,12 @@ export async function POST(request: Request) {
       );
     }
     if (storageError) throw storageError;
-    if (!photoInfo.contentType?.startsWith("image/")) {
-      throw new ApiError(400, "invalid_request", "画像ファイルではありません");
+    if (!isAllowedPhotoMimeType(photoInfo.contentType ?? "")) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "JPEG、PNG、WebP形式の画像を選択してください",
+      );
     }
     if (photoInfo.size === 0 || (photoInfo.size ?? 0) > MAX_PHOTO_BYTES) {
       throw new ApiError(

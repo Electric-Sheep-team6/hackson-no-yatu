@@ -161,6 +161,7 @@ describe("日記・写真投稿API", () => {
 
   it.each([
     ["text/html", 100, "非画像"],
+    ["image/gif", 100, "AI非対応画像"],
     ["image/jpeg", 0, "空ファイル"],
     ["image/jpeg", 10 * 1024 * 1024 + 1, "10MB超"],
   ])("%s・%sバイトの%sを登録しない", async (contentType, size) => {

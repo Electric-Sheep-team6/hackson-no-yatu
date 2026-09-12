@@ -206,7 +206,7 @@ export function MovieApp() {
               >
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   multiple
                   disabled={libraryDisabled}
                   className="hidden"

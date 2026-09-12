@@ -427,23 +427,26 @@ describe("useMovieFlow", () => {
     expect(result.current.message?.text).toBe("写真を記録できませんでした");
   });
 
-  it("画像ではないファイルをStorageへ送信しない", async () => {
+  it.each([
+    ["text/plain", "note.txt"],
+    ["image/gif", "animated.gif"],
+  ])("AI非対応の%sファイルをStorageへ送信しない", async (type, name) => {
     global.fetch = vi.fn(async () => Response.json({ items: [] })) as typeof fetch;
     const { result } = renderHook(() => useMovieFlow());
     await waitFor(() => expect(result.current.userEmail).not.toBeNull());
-    const textFile = new File(["not an image"], "note.txt", {
-      type: "text/plain",
+    const unsupportedFile = new File(["unsupported image"], name, {
+      type,
     });
 
     await act(async () => {
       await result.current.uploadPhotos({
-        target: { files: [textFile], value: "" },
+        target: { files: [unsupportedFile], value: "" },
       } as unknown as React.ChangeEvent<HTMLInputElement>);
     });
 
     expect(uploadMock).not.toHaveBeenCalled();
     expect(result.current.message?.text).toBe(
-      "画像ファイルだけをアップロードできます。",
+      "JPEG、PNG、WebP形式の画像を選択してください。",
     );
   });
 });

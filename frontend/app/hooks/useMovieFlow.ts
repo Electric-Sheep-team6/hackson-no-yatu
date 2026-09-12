@@ -9,7 +9,11 @@ import {
 } from "react";
 
 import { createClient } from "@/lib/supabase/client";
-import { emailSchema, MAX_PHOTO_BYTES } from "@/lib/validation";
+import {
+  emailSchema,
+  isAllowedPhotoMimeType,
+  MAX_PHOTO_BYTES,
+} from "@/lib/validation";
 
 type Diary = { id: string; content: string; createdAt: string };
 type PhotoPreview = { id: string; name: string; previewUrl: string };
@@ -323,8 +327,8 @@ export function useMovieFlow() {
 
           setUploadProgress({ current: index + 1, total: files.length });
 
-          if (!file.type.startsWith("image/")) {
-            throw new Error("画像ファイルだけをアップロードできます。");
+          if (!isAllowedPhotoMimeType(file.type)) {
+            throw new Error("JPEG、PNG、WebP形式の画像を選択してください。");
           }
           if (file.size === 0) {
             throw new Error("空の画像ファイルはアップロードできません。");

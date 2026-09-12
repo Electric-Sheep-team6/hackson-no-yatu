@@ -227,4 +227,21 @@ describe("database migrations", () => {
     expect(migration).toContain("not valid");
   });
 
+  it("AI処理が共通対応する写真形式だけをStorageで許可する", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0016_restrict_photo_formats.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("update storage.buckets");
+    expect(migration).toContain("'image/jpeg'");
+    expect(migration).toContain("'image/png'");
+    expect(migration).toContain("'image/webp'");
+    expect(migration).not.toContain("'image/*'");
+    expect(migration).toContain("where id = 'photos'");
+  });
+
 });
