@@ -211,4 +211,20 @@ describe("database migrations", () => {
     );
   });
 
+  it("直接INSERTでも空白・1万字超の日記を保存できない", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0015_validate_diary_content.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("alter table public.diaries");
+    expect(migration).toContain("add constraint diaries_content_length_check");
+    expect(migration).toContain("char_length(btrim(content)) >= 1");
+    expect(migration).toContain("char_length(content) <= 10000");
+    expect(migration).toContain("not valid");
+  });
+
 });
