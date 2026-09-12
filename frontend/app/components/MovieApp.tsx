@@ -45,7 +45,7 @@ export function MovieApp() {
                 </span>
                 <button
                   type="button"
-                  disabled={disabled}
+                  disabled={flow.busy !== null && flow.busy !== "movie"}
                   onClick={flow.signOut}
                   className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:border-white/30 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >

@@ -268,7 +268,7 @@ export function useMovieFlow() {
   );
 
   const signOut = useCallback(async () => {
-    if (busy !== null) return;
+    if (busy !== null && busy !== "movie") return;
 
     setBusy("auth");
     setMessage(null);
@@ -589,7 +589,7 @@ export function useMovieFlow() {
         setMovie(next);
 
         if (["completed", "failed"].includes(next.status)) {
-          setBusy(null);
+          setBusy((current) => (current === "movie" ? null : current));
 
           if (next.status === "completed") {
             showMessage("映画が完成しました。", "success", "movie");

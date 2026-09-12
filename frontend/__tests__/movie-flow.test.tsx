@@ -234,6 +234,52 @@ describe("useMovieFlow", () => {
     expect(result.current.movie).toBeNull();
   });
 
+  it("映画生成中でもログアウトして端末上のデータを消去できる", async () => {
+    const signOut = vi.fn().mockResolvedValue({ error: null });
+    createClientMock.mockReturnValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1", email: "saku@example.com" } },
+        }),
+        signOut,
+      },
+      storage: {
+        from: vi.fn(() => ({ remove: removeMock, upload: uploadMock })),
+      },
+    });
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString();
+      if (path === "/api/movies") {
+        return Response.json({
+          items: [{ id: "movie-1", status: "processing" }],
+        });
+      }
+      if (path === "/api/movies/movie-1") {
+        return Response.json({
+          id: "movie-1",
+          status: "processing",
+          errorMessage: null,
+          videoUrl: null,
+          movie: null,
+        });
+      }
+      return Response.json({ items: [] });
+    }) as typeof fetch;
+
+    const { result } = renderHook(() => useMovieFlow());
+    await waitFor(() => {
+      expect(result.current.busy).toBe("movie");
+      expect(result.current.movie?.id).toBe("movie-1");
+    });
+
+    await act(async () => result.current.signOut());
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(result.current.userEmail).toBeNull();
+    expect(result.current.movie).toBeNull();
+    expect(result.current.busy).toBeNull();
+  });
+
   it("日記と画像の投稿から偏愛分析、映画完成まで画面操作で実行する", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
