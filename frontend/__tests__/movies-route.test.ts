@@ -159,6 +159,7 @@ describe("POST /api/movies", () => {
     const photoLimit = vi.fn().mockResolvedValue({
       data: [
         { storage_path: "user-1/photo-1.jpg" },
+        { storage_path: "other-user/private.jpg" },
         { storage_path: "user-1/missing.jpg" },
         { storage_path: "user-1/photo-2.jpg" },
       ],
@@ -259,6 +260,10 @@ describe("POST /api/movies", () => {
       ascending: false,
     });
     expect(photoLimit).toHaveBeenCalledWith(12);
+    expect(createSignedUrl).not.toHaveBeenCalledWith(
+      "other-user/private.jpg",
+      3600,
+    );
     expect(generateSceneMock).toHaveBeenCalledTimes(3);
     expect(generateSceneMock).toHaveBeenNthCalledWith(1, {
       prompt: "prompt-1",

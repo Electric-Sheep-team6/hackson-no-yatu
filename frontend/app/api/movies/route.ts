@@ -9,7 +9,10 @@ import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrl
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { createMovieSchema } from "@/lib/validation";
+import {
+  createMovieSchema,
+  isOwnedPhotoStoragePath,
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -40,9 +43,12 @@ async function processMovieGeneration(
       .limit(12);
     if (photosResult.error) throw photosResult.error;
 
+    const ownedPhotoPaths = photosResult.data
+      .map(({ storage_path }) => storage_path)
+      .filter((storagePath) => isOwnedPhotoStoragePath(storagePath, userId));
     const signedUrlResults = await Promise.all(
-      photosResult.data.map(({ storage_path }) =>
-        admin.storage.from("photos").createSignedUrl(storage_path, 3600),
+      ownedPhotoPaths.map((storagePath) =>
+        admin.storage.from("photos").createSignedUrl(storagePath, 3600),
       ),
     );
     const photoUrls = signedUrlResults.flatMap(({ data, error }) =>

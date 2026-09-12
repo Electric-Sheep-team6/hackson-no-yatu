@@ -11,6 +11,11 @@ export function isAllowedPhotoMimeType(value: string) {
   return ALLOWED_PHOTO_MIME_TYPES.some((mimeType) => mimeType === value);
 }
 
+export function isOwnedPhotoStoragePath(value: string, userId: string) {
+  const [ownerId, fileName, ...extraSegments] = value.split("/");
+  return ownerId === userId && Boolean(fileName) && extraSegments.length === 0;
+}
+
 export const emailSchema = z.email();
 
 export const createDiarySchema = z.object({

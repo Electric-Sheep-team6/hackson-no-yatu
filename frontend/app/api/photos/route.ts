@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   createPhotoSchema,
   isAllowedPhotoMimeType,
+  isOwnedPhotoStoragePath,
   MAX_PHOTO_BYTES,
 } from "@/lib/validation";
 
@@ -24,12 +25,7 @@ export async function POST(request: Request) {
       await request.json(),
     );
 
-    const [ownerId, fileName, ...extraSegments] = storagePath.split("/");
-    if (
-      ownerId !== user.id ||
-      !fileName ||
-      extraSegments.length > 0
-    ) {
+    if (!isOwnedPhotoStoragePath(storagePath, user.id)) {
       throw new ApiError(
         403,
         "forbidden",

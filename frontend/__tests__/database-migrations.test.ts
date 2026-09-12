@@ -244,4 +244,24 @@ describe("database migrations", () => {
     expect(migration).toContain("where id = 'photos'");
   });
 
+  it("直接INSERTでも他人のStorageパスを写真行へ保存できない", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0017_enforce_photo_storage_ownership.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain('drop policy "insert own photos"');
+    expect(migration).toContain("user_id = auth.uid()");
+    expect(migration).toContain(
+      "storage_path like auth.uid()::text || '/%'",
+    );
+    expect(migration).toContain(
+      "storage_path not like auth.uid()::text || '/%/%'",
+    );
+    expect(migration).toContain("diaries.user_id = auth.uid()");
+  });
+
 });
