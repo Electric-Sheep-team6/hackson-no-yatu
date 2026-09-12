@@ -27,18 +27,14 @@ async function resolveFfmpegPath(): Promise<string> {
 
 export async function prepareHologramVideo(
   video: Uint8Array,
-  requestedDuration: number,
-  generatedDuration: number,
 ): Promise<Uint8Array> {
   const directory = await mkdtemp(join(tmpdir(), "last-screen-scene-"));
   const inputPath = join(directory, "source.mp4");
   const outputPath = join(directory, "square.mp4");
-  const duration = Math.min(requestedDuration, generatedDuration);
   try {
     await writeFile(inputPath, video);
     await execFileAsync(await resolveFfmpegPath(), [
       "-y", "-i", inputPath,
-      "-t", String(duration),
       "-vf", `crop='min(iw,ih)':'min(iw,ih)',scale=${SQUARE_OUTPUT_SIZE}:${SQUARE_OUTPUT_SIZE},setsar=1`,
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
       "-movflags", "+faststart", outputPath,

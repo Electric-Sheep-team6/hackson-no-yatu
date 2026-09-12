@@ -47,7 +47,7 @@ describe.skipIf(!systemFfmpegPath || !systemFfprobePath)("prepareHologramVideo",
         "-pix_fmt", "yuv420p", sourcePath,
       ]);
 
-      const output = await prepareHologramVideo(new Uint8Array(await readFile(sourcePath)), 1, 1);
+      const output = await prepareHologramVideo(new Uint8Array(await readFile(sourcePath)));
       await writeFile(outputPath, output);
       const { stdout } = await execFileAsync(systemFfprobePath, [
         "-v", "error", "-select_streams", "v:0",

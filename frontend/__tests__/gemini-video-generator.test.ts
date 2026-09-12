@@ -8,14 +8,9 @@ import { beginMovieImageCache } from "@/lib/ai/referenceImage";
 import { GeminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
 
 const originalFetch = global.fetch;
-const completedOperation = {
-  name: "operations/video-1",
-  done: true,
-  response: {
-    generateVideoResponse: {
-      generatedSamples: [{ video: { encodedVideo: "AQID" } }],
-    },
-  },
+const completedInteraction = {
+  id: "interaction-1",
+  output_video: { type: "video", data: "AQID" },
 };
 
 function imageResponse(): Response {
@@ -30,14 +25,13 @@ beforeEach(() => {
 afterEach(() => {
   global.fetch = originalFetch;
   vi.unstubAllEnvs();
-  vi.useRealTimers();
 });
 
 describe("GeminiVideoGenerator", () => {
-  it("Veo LROへ参照画像と8秒指定を送り、返却動画を正方形化する", async () => {
+  it("Omni Flashへ参照画像とタイムコードを送り、返却動画を正方形化する", async () => {
     global.fetch = vi.fn()
       .mockResolvedValueOnce(imageResponse())
-      .mockResolvedValueOnce(new Response(JSON.stringify(completedOperation), { status: 200 })) as typeof fetch;
+      .mockResolvedValueOnce(new Response(JSON.stringify(completedInteraction), { status: 200 })) as typeof fetch;
 
     const result = await new GeminiVideoGenerator().generateScene({
       prompt: "A centered subject on pure black.",
@@ -45,45 +39,45 @@ describe("GeminiVideoGenerator", () => {
       referenceImageUrls: ["https://storage.example.com/photo.jpg"],
     });
 
-    expect(result).toEqual({ providerJobId: "operations/video-1", videoData: new Uint8Array([1, 2, 3]) });
+    expect(result).toEqual({ providerJobId: "interaction-1", videoData: new Uint8Array([1, 2, 3]) });
     const [url, request] = vi.mocked(global.fetch).mock.calls[1];
-    expect(url).toContain("/models/veo-3.1-generate-preview:predictLongRunning");
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/interactions");
     const body = JSON.parse((request as RequestInit).body as string);
     expect(body).toMatchObject({
-      instances: [{ referenceImages: [{
-        image: { bytesBase64Encoded: "AQID", mimeType: "image/jpeg" },
-        referenceType: "ASSET",
-      }] }],
-      parameters: { sampleCount: 1, aspectRatio: "16:9", resolution: "720p", durationSeconds: 8 },
+      model: "gemini-omni-1.1-flash",
+      input: [
+        { type: "image", data: "AQID", mime_type: "image/jpeg" },
+        { type: "text", text: "[0-5s] A centered subject on pure black." },
+      ],
+      generation_config: { video_config: { task: "reference_to_video" } },
+      response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p" },
     });
-    expect(prepareHologramVideo).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), 5, 8);
+    expect(body.response_format).not.toHaveProperty("delivery");
+    expect(prepareHologramVideo).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
   });
 
-  it("未完了operationをポーリングして動画を取得する", async () => {
-    vi.useFakeTimers();
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ name: "operations/video-1" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(completedOperation), { status: 200 })) as typeof fetch;
+  it("参照画像がなければtext_to_videoを使う", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(completedInteraction), { status: 200 }),
+    ) as typeof fetch;
 
-    const pending = new GeminiVideoGenerator().generateScene({
+    await new GeminiVideoGenerator().generateScene({
       prompt: "scene",
-      duration: 5,
+      duration: 10,
       referenceImageUrls: [],
     });
-    await vi.runAllTimersAsync();
 
-    await expect(pending).resolves.toMatchObject({ providerJobId: "operations/video-1" });
-    expect(vi.mocked(global.fetch).mock.calls[1][0]).toContain("/v1beta/operations/video-1");
-    const requestBody = JSON.parse((vi.mocked(global.fetch).mock.calls[0][1] as RequestInit).body as string);
-    expect(requestBody.instances[0]).not.toHaveProperty("referenceImages");
-    expect(requestBody.parameters.durationSeconds).toBe(6);
+    const request = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(request.body as string);
+    expect(body.input).toEqual([{ type: "text", text: "[0-10s] scene" }]);
+    expect(body.generation_config.video_config.task).toBe("text_to_video");
   });
 
   it("同じ映画生成内では同一URLを1回だけ取得する", async () => {
     beginMovieImageCache();
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       if (String(input).startsWith("https://storage.example.com")) return imageResponse();
-      return new Response(JSON.stringify(completedOperation), { status: 200 });
+      return new Response(JSON.stringify(completedInteraction), { status: 200 });
     });
     global.fetch = fetchMock as typeof fetch;
     const generator = new GeminiVideoGenerator();
@@ -143,11 +137,9 @@ describe("GeminiVideoGenerator", () => {
     })).rejects.toThrow("参照画像が大きすぎます");
   });
 
-  it("完了応答に動画がなければ拒否する", async () => {
+  it("同期応答に動画がなければ拒否する", async () => {
     global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      name: "operations/video-1",
-      done: true,
-      response: { generateVideoResponse: {} },
+      id: "interaction-1",
     }), { status: 200 })) as typeof fetch;
 
     await expect(new GeminiVideoGenerator().generateScene({

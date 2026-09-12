@@ -77,11 +77,11 @@ describe("AI generation", () => {
 
     expect(responsesParse).not.toHaveBeenCalled();
     const [url, request] = vi.mocked(global.fetch).mock.calls[0];
-    expect(url).toContain("/models/gemini-2.5-flash:generateContent");
+    expect(url).toContain("/models/gemini-3.8-flash:generateContent");
     const body = JSON.parse((request as RequestInit).body as string);
     expect(body.generationConfig).toMatchObject({
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 0 },
+      thinkingConfig: { thinkingLevel: "MINIMAL" },
     });
     expect(body.generationConfig.responseJsonSchema).toBeDefined();
   });
