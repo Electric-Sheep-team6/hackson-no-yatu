@@ -7,10 +7,11 @@ import { composeMovie } from "@/lib/ai/video/composeMovie";
 import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
 import type { GenerateSceneResult } from "@/lib/ai/video/VideoGenerator";
 import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
+import { beginMovieImageCache } from "@/lib/ai/referenceImage";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const SCENE_CONCURRENCY = 3;
-export const MAX_SCENE_RETRIES = 2;
+export const MAX_SCENE_RETRIES = 1;
 export const SCENE_RETRY_BASE_MS = 1_000;
 export const MAX_SCENES = 3;
 
@@ -279,8 +280,8 @@ async function createScript(
     await updateMovie(admin, movieId, userId, { status: "generating" });
     const script = await generateMovieScript({ obsession, photoUrls });
     const scenes = script.scenes
-      .slice(0, MAX_SCENES)
-      .toSorted((a, b) => a.order - b.order);
+      .toSorted((a, b) => a.order - b.order)
+      .slice(0, MAX_SCENES);
     return { ...script, scenes };
   } catch (error) {
     throw new GenerationStageError("脚本生成", classifyError(error));
@@ -357,6 +358,8 @@ export async function processMovieGeneration(
   obsession: ObsessionAnalysis,
 ) {
   const admin = createAdminClient();
+  // 同一映画の生成内では、同じ参照画像を一度しか取得しない。
+  beginMovieImageCache();
   try {
     const photoUrls = await prepareGeneration(admin, movieId, userId);
     const movie = await createScript(admin, movieId, userId, obsession, photoUrls);

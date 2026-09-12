@@ -7,7 +7,7 @@ import type { GenerateSceneInput, GenerateSceneResult, VideoGenerator } from "./
 const GEMINI_MODEL = "gemini-omni-1.1-flash";
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 const MAX_REFERENCE_IMAGES = 3;
-const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = 75_000;
 
 const videoContentSchema = z.object({
   type: z.literal("video").optional(),
