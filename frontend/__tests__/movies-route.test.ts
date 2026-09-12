@@ -227,19 +227,15 @@ describe("POST /api/movies", () => {
       })),
     };
     generateMovieScriptMock.mockResolvedValue(movieScript);
-    generateSceneMock
-      .mockResolvedValueOnce({
-        providerJobId: "job-1",
-        videoData: new Uint8Array([1]),
-      })
-      .mockResolvedValueOnce({
-        providerJobId: "job-2",
-        videoData: new Uint8Array([2]),
-      })
-      .mockResolvedValueOnce({
-        providerJobId: "job-3",
-        videoData: new Uint8Array([3]),
-      });
+    const sceneResolvers: Array<
+      (value: { providerJobId: string; videoData: Uint8Array }) => void
+    > = [];
+    generateSceneMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          sceneResolvers.push(resolve);
+        }),
+    );
     composeMovieMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
 
     const response = await POST(
@@ -253,7 +249,15 @@ describe("POST /api/movies", () => {
     expect(response.status).toBe(201);
     expect(afterMock).toHaveBeenCalledOnce();
     const backgroundJob = afterMock.mock.calls[0][0] as () => Promise<void>;
-    await backgroundJob();
+    const backgroundPromise = backgroundJob();
+    await vi.waitFor(() => expect(generateSceneMock).toHaveBeenCalledTimes(3));
+    sceneResolvers.forEach((resolve, index) =>
+      resolve({
+        providerJobId: `job-${index + 1}`,
+        videoData: new Uint8Array([index + 1]),
+      }),
+    );
+    await backgroundPromise;
 
     expect(generateMovieScriptMock).toHaveBeenCalledWith({
       obsession: { title: "夜道への偏愛" },
@@ -398,7 +402,11 @@ describe("POST /api/movies", () => {
         providerJobId: "job-1",
         videoData: new Uint8Array([1]),
       })
-      .mockRejectedValueOnce(new Error("provider unavailable"));
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce({
+        providerJobId: "job-3",
+        videoData: new Uint8Array([3]),
+      });
 
     const response = await POST(
       new Request("http://localhost/api/movies", {
@@ -419,6 +427,7 @@ describe("POST /api/movies", () => {
     ]);
     expect(remove).toHaveBeenCalledWith([
       "user-1/22222222-2222-4222-8222-222222222222/scenes/1.mp4",
+      "user-1/22222222-2222-4222-8222-222222222222/scenes/3.mp4",
     ]);
     expect(composeMovieMock).not.toHaveBeenCalled();
   });

@@ -76,10 +76,8 @@ async function processMovieGeneration(
       .eq("user_id", userId);
     if (result.error) throw result.error;
 
-    const generatedScenes: { order: number; path: string; providerJobId: string }[] = [];
-    const sceneVideos: Uint8Array[] = [];
-    for (const scene of movie.scenes) {
-      stage = "シーン動画の生成";
+    stage = "シーン動画の生成";
+    const sceneResults = await Promise.allSettled(movie.scenes.map(async (scene) => {
       const generated = await geminiVideoGenerator.generateScene({
         prompt: scene.videoPrompt,
         duration: scene.duration,
@@ -95,16 +93,35 @@ async function processMovieGeneration(
         .upload(path, generated.videoData, { contentType: "video/mp4", upsert: true });
       if (uploadError) throw uploadError;
       uploadedMoviePaths.push(path);
-      generatedScenes.push({ order: scene.order, path, providerJobId: generated.providerJobId });
-      sceneVideos.push(generated.videoData);
 
-      result = await admin
+      const heartbeatResult = await admin
         .from("movies")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", movieId)
         .eq("user_id", userId);
-      if (result.error) throw result.error;
-    }
+      if (heartbeatResult.error) throw heartbeatResult.error;
+
+      return {
+        generatedScene: {
+          order: scene.order,
+          path,
+          providerJobId: generated.providerJobId,
+        },
+        videoData: generated.videoData,
+      };
+    }));
+    const failedScene = sceneResults.find(
+      (sceneResult) => sceneResult.status === "rejected",
+    );
+    if (failedScene?.status === "rejected") throw failedScene.reason;
+
+    const completedScenes = sceneResults.flatMap((sceneResult) =>
+      sceneResult.status === "fulfilled" ? [sceneResult.value] : [],
+    );
+    const generatedScenes = completedScenes.map(
+      ({ generatedScene }) => generatedScene,
+    );
+    const sceneVideos = completedScenes.map(({ videoData }) => videoData);
 
     stage = "映像の結合";
     const finalVideo = await composeMovie(sceneVideos);
