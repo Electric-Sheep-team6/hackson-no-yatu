@@ -81,7 +81,7 @@ describe("AI generation", () => {
     const body = JSON.parse((request as RequestInit).body as string);
     expect(body.generationConfig).toMatchObject({
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingLevel: "LOW" },
+      thinkingConfig: { thinkingLevel: "MEDIUM" },
     });
     expect(body.generationConfig.responseJsonSchema).toBeDefined();
   });

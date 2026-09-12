@@ -121,4 +121,18 @@ describe("database migrations", () => {
     expect(migration).toContain("public = excluded.public");
   });
 
+  it("記録動画を利用者別に保存するprivateテーブルとバケットを作る", () => {
+    const migration = readFileSync(
+      resolve(process.cwd(), "../supabase/migrations/0010_add_memory_videos.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("create table public.videos");
+    expect(migration).toContain("alter table public.videos enable row level security");
+    expect(migration).toContain("user_id = auth.uid()");
+    expect(migration).toContain("'videos',\n  'videos',\n  false");
+    expect(migration).toContain("26214400");
+    expect(migration).toContain("allowed_mime_types");
+    expect(migration).toContain("bucket_id = 'videos'");
+  });
+
 });

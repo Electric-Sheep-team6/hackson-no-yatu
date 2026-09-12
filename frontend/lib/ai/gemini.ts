@@ -8,7 +8,8 @@ export const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const MAX_TEXT_IMAGES = 26;
-const GEMINI_THINKING_LEVEL = "LOW";
+// 構成・素材選択の品質を優先し、Gemini 3.8 Flash の思考量を一段上げる。
+const GEMINI_THINKING_LEVEL = "MEDIUM";
 
 type JsonSchema = Record<string, unknown>;
 

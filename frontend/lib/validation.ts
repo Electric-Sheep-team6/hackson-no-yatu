@@ -11,6 +11,10 @@ export const createPhotoSchema = z.object({
   diaryId: z.uuid().nullable().optional(),
 });
 
+export const createVideoSchema = z.object({
+  storagePath: z.string().min(1),
+});
+
 export const createMovieSchema = z.object({
   obsessionId: z.uuid(),
 });

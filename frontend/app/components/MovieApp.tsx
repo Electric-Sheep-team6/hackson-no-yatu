@@ -1,15 +1,124 @@
 "use client";
 
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useMovieFlow } from "@/app/hooks/useMovieFlow";
+import { createClient } from "@/lib/supabase/client";
 
-export function MovieApp() {
+export function MovieApp({ userEmail }: { userEmail: string }) {
   const flow = useMovieFlow();
+  const router = useRouter();
   const disabled = flow.busy !== null;
+  const [signingOut, setSigningOut] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  return <main className="min-h-screen bg-[#070b12] text-white"><div className="mx-auto max-w-6xl px-4 py-10 sm:px-6"><header className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4"><div><p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Made in 冥途</p><h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">人生の最後に観る映画を、人生をかけて作る。</h1></div>{flow.userEmail ? <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100">{flow.userEmail}</span> : <div className="flex flex-wrap gap-2"><input aria-label="メールアドレス" value={flow.email} onChange={(event) => flow.setEmail(event.target.value)} type="email" placeholder="メールアドレス" className="rounded-full border border-white/15 bg-slate-950 px-3 py-2 text-sm" /><input aria-label="パスワード" value={flow.password} onChange={(event) => flow.setPassword(event.target.value)} type="password" placeholder="パスワード" className="rounded-full border border-white/15 bg-slate-950 px-3 py-2 text-sm" /><button type="button" disabled={disabled || !flow.email || !flow.password} onClick={() => flow.authenticate("signIn")} className="rounded-full bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 disabled:opacity-50">ログイン</button><button type="button" disabled={disabled || !flow.email || !flow.password} onClick={() => flow.authenticate("signUp")} className="px-2 text-sm text-cyan-200 underline disabled:opacity-50">新規登録</button></div>}</header>
-    <section className="rounded-[32px] border border-white/10 bg-slate-900 p-6 sm:p-8"><p className="text-xs uppercase tracking-[0.3em] text-cyan-300">1. library</p><h2 className="mt-2 text-2xl font-semibold">日記と写真を、何度でも貯める</h2><p className="mt-2 text-sm text-slate-300">保存済みの全日記・全写真が、次の偏愛分析と映画生成の素材になります。</p><div className="mt-6 grid gap-6 lg:grid-cols-2"><div><label htmlFor="diary" className="mb-2 block text-sm font-medium">新しい日記</label><textarea id="diary" value={flow.diaryDraft} onChange={(event) => flow.setDiaryDraft(event.target.value)} rows={6} placeholder="今日残したい記憶を書いてください" className="w-full rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm placeholder:text-slate-500" /><button type="button" onClick={flow.saveDiary} disabled={disabled || !flow.diaryDraft.trim()} className="mt-3 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-50">{flow.busy === "diary" ? "保存中..." : "日記を追加"}</button><div className="mt-4 space-y-2"><p className="text-xs uppercase tracking-wider text-slate-400">保存済みの日記 {flow.diaries.length}件</p>{flow.diaries.length ? flow.diaries.map((diary) => <article key={diary.id} className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200"><p className="line-clamp-3">{diary.content}</p><time className="mt-2 block text-xs text-slate-500">{new Date(diary.createdAt).toLocaleDateString("ja-JP")}</time></article>) : <p className="text-sm text-slate-500">まだ日記がありません。</p>}</div></div><div><p className="mb-2 text-sm font-medium">写真ライブラリ</p><label className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-cyan-400/40 bg-cyan-500/5 px-4 py-8 text-sm text-cyan-100"><input type="file" accept="image/*" multiple className="hidden" onChange={flow.uploadPhotos} />複数の写真を選択して追加</label><p className="mt-3 text-sm text-slate-300">保存済み: {flow.photoCount}枚</p><div className="mt-3 grid grid-cols-3 gap-2">{flow.newPhotos.map((photo) => <img key={photo.id} src={photo.previewUrl} alt={photo.name} className="h-24 w-full rounded-xl object-cover" />)}</div></div></div></section>
-    <section className="mt-8 rounded-[32px] border border-white/10 bg-slate-900 p-6 sm:p-8"><p className="text-xs uppercase tracking-[0.3em] text-violet-300">2. obsession analysis</p><h2 className="mt-2 text-2xl font-semibold">蓄積した記録から、偏愛を見つける</h2><p className="mt-2 text-sm text-slate-300">対象: 日記 {flow.diaries.length}件・写真 {flow.photoCount}枚</p><button type="button" onClick={flow.analyze} disabled={disabled || flow.diaries.length + flow.photoCount === 0} className="mt-5 rounded-full bg-violet-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{flow.busy === "analysis" ? "分析中..." : "偏愛を分析"}</button>{flow.obsession && <article className="mt-5 rounded-2xl border border-violet-400/30 bg-violet-500/10 p-5"><p className="text-xs text-violet-200">検出された偏愛</p><h3 className="mt-2 text-xl font-semibold">{flow.obsession.title}</h3><p className="mt-2 leading-7 text-slate-200">{flow.obsession.reason}</p></article>}</section>
-    <section className="mt-8 rounded-[32px] border border-white/10 bg-slate-900 p-6 sm:p-8"><p className="text-xs uppercase tracking-[0.3em] text-pink-300">3. movie generation</p><h2 className="mt-2 text-2xl font-semibold">偏愛を、一本の映画にする</h2><p className="mt-2 text-sm text-slate-300">偏愛分析後に、脚本・シーン生成・結合を順番に実行します。</p><button type="button" onClick={flow.generate} disabled={disabled || !flow.obsession} className="mt-5 rounded-full bg-pink-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{flow.busy === "movie" ? "映画を生成中..." : "映画を生成"}</button>{flow.movie?.videoUrl ? <video controls preload="metadata" className="mt-6 aspect-video w-full rounded-2xl bg-black" src={flow.movie.videoUrl}>生成した映画</video> : <div className="mt-6 flex aspect-video items-center justify-center rounded-2xl border border-white/10 bg-slate-950 text-sm text-slate-400">{flow.movie ? `生成状態: ${flow.movie.status}` : "映画を生成すると、ここで再生できます。"}</div>}{flow.movie?.movie?.scenes && <ol className="mt-5 grid gap-2 sm:grid-cols-3">{flow.movie.movie.scenes.map((scene) => <li key={scene.order} className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm"><span className="text-pink-200">{scene.order}. </span>{scene.source}<p className="mt-1 text-xs text-slate-300">{scene.narration}</p></li>)}</ol>}</section>
-    {flow.message && <p role="status" className="mt-6 rounded-xl border border-cyan-400/30 bg-cyan-500/10 p-4 text-sm text-cyan-100">{flow.message}</p>}
-  </div></main>;
+  const signOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    setAuthError(null);
+
+    try {
+      const { error } = await createClient().auth.signOut();
+      if (error) throw error;
+      router.replace("/login");
+      router.refresh();
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "ログアウトに失敗しました。");
+      setSigningOut(false);
+    }
+  };
+
+  return (
+    <main className="last-screen-shell">
+      <div className="sky-orb sky-orb-left" aria-hidden="true" />
+      <div className="sky-orb sky-orb-right" aria-hidden="true" />
+
+      <header className="site-header">
+        <a className="brand-mark" href="#top" aria-label="Made in 冥途 ホーム">
+          <span>Made in 冥途</span>
+          <small>たきささえ</small>
+        </a>
+
+        <div className="user-session">
+          <div><span>ログイン中</span><p>{userEmail}</p></div>
+          <button type="button" className="text-button" disabled={signingOut || disabled} onClick={() => void signOut()}>{signingOut ? "ログアウト中..." : "ログアウト"}</button>
+          {authError && <p role="alert" className="session-error">{authError}</p>}
+        </div>
+      </header>
+
+      <div id="top" className="page-frame">
+        <section className="hero" aria-labelledby="hero-title">
+          <p className="hero-kicker">100歳のわたしへ贈る</p>
+          <h1 id="hero-title">人生の<br />最終上映</h1>
+          <p className="hero-lead">日々の記録から、あなたが愛した時間を見つける。<br />それを、一本の映画として未来へ届けます。</p>
+          <div className="stairway" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
+        </section>
+
+        <div className="journey-intro">
+          <p>YOUR LIFE, ONE LAST SCREENING</p>
+          <span>記録する</span><span>見つける</span><span>映画にする</span>
+        </div>
+
+        <section className="process-section" aria-labelledby="library-title">
+          <div className="section-heading">
+            <p className="step-number">01</p>
+            <div><p className="eyebrow">MEMORY LIBRARY</p><h2 id="library-title">あなたの日々を、残していく</h2><p>日記・写真・動画は、未来のあなたへ贈る映画の素材になります。</p></div>
+          </div>
+
+          <div className="library-layout">
+            <div className="diary-column">
+              <label htmlFor="diary" className="field-label">今日の記憶</label>
+              <textarea id="diary" value={flow.diaryDraft} onChange={(event) => flow.setDiaryDraft(event.target.value)} rows={6} placeholder="今日、心に残ったことを書いてください。" />
+              <button type="button" onClick={flow.saveDiary} disabled={disabled || !flow.diaryDraft.trim()} className="button">{flow.busy === "diary" ? "保存中..." : "日記を残す"}</button>
+
+              <div className="saved-diaries">
+                <p className="list-caption">保存した日記　{flow.diaries.length}件</p>
+                {flow.diaries.length ? flow.diaries.map((diary) => (
+                  <article key={diary.id} className="diary-entry"><p>{diary.content}</p><time>{new Date(diary.createdAt).toLocaleDateString("ja-JP")}</time></article>
+                )) : <p className="empty-copy">最初の記憶を残してみましょう。</p>}
+              </div>
+            </div>
+
+            <div className="media-column">
+              <p className="field-label">写真と動画</p>
+              <div className="upload-row">
+                <label className="upload-control"><input type="file" accept="image/*" multiple onChange={flow.uploadPhotos} /><span className="upload-symbol" aria-hidden="true">＋</span><span>写真を追加</span><small>思い出の一枚を選ぶ</small></label>
+                <label className="upload-control"><input type="file" accept="video/*" multiple onChange={flow.uploadVideos} /><span className="upload-symbol" aria-hidden="true">＋</span><span>動画を追加</span><small>25MB以下・最大4本</small></label>
+              </div>
+              <p className="media-count">写真 <strong>{flow.photoCount}</strong>枚<span aria-hidden="true">／</span>動画 <strong>{flow.videoCount}</strong>本</p>
+              <p className="support-copy">映画には直近の写真26枚と動画4本までを使います。</p>
+              {flow.newPhotos.length > 0 && <div className="photo-strip">{flow.newPhotos.map((photo) => <Image key={photo.id} src={photo.previewUrl} alt={photo.name} width={240} height={180} unoptimized />)}</div>}
+            </div>
+          </div>
+        </section>
+
+        <section className="process-section analysis-section" aria-labelledby="analysis-title">
+          <div className="section-heading">
+            <p className="step-number">02</p>
+            <div><p className="eyebrow">FIND YOUR STORY</p><h2 id="analysis-title">記録の中から、偏愛を見つける</h2><p>何度も選んだ景色や言葉から、あなたらしさの核を読み取ります。</p></div>
+          </div>
+          <div className="action-line">
+            <p>日記 {flow.diaries.length}件　写真 {flow.photoCount}枚　動画 {flow.videoCount}本</p>
+            <button type="button" onClick={flow.analyze} disabled={disabled || flow.diaries.length + flow.photoCount + flow.videoCount === 0} className="button button-wide">{flow.busy === "analysis" ? "分析中..." : "わたしの偏愛を見つける"}</button>
+          </div>
+          {flow.obsession && <article className="obsession-result"><p className="eyebrow">YOUR OBSESSION</p><h3>{flow.obsession.title}</h3><p>{flow.obsession.reason}</p></article>}
+        </section>
+
+        <section className="process-section screening-section" aria-labelledby="movie-title">
+          <div className="section-heading">
+            <p className="step-number">03</p>
+            <div><p className="eyebrow">LAST SCREENING</p><h2 id="movie-title">偏愛を、一本の映画にする</h2><p>実際の記録を中心に、AIの象徴映像を織り交ぜた約56秒の予告編です。</p></div>
+          </div>
+          <button type="button" onClick={flow.generate} disabled={disabled || !flow.obsession || flow.photoCount === 0} className="button premiere-button">{flow.busy === "movie" ? "映画を編集中..." : "人生の映画をつくる"}</button>
+          <div className="screen-frame">
+            {flow.movie?.videoUrl ? <video controls preload="metadata" src={flow.movie.videoUrl}>生成した映画</video> : <div className="empty-screen"><span>MADE IN MEIDO</span><p>{flow.movie ? `生成状態: ${flow.movie.status}` : "あなたの映画は、ここで上映されます。"}</p></div>}
+          </div>
+        </section>
+
+        {flow.message && <p role="status" className="status-message">{flow.message}</p>}
+        <footer><p>衰えを受け入れた上で、これまで生きてきた世界と、もう一度ポジティブに関わる。</p><span>Made in 冥途</span></footer>
+      </div>
+    </main>
+  );
 }

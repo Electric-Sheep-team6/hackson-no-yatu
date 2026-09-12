@@ -49,14 +49,15 @@ describe("GeminiVideoGenerator", () => {
         { type: "image", data: "AQID", mime_type: "image/jpeg" },
         { type: "text", text: "[0-5s] A centered subject on pure black." },
       ],
-      generation_config: { video_config: { task: "reference_to_video" } },
-      response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p" },
+      generation_config: { video_config: {} },
+      response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p", duration: "5s" },
+      store: false,
     });
     expect(body.response_format).not.toHaveProperty("delivery");
     expect(prepareHologramVideo).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
   });
 
-  it("参照画像がなければtext_to_videoを使う", async () => {
+  it("参照画像がなくてもモデル推論に任せ、指定尺を送る", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(completedInteraction), { status: 200 }),
     ) as typeof fetch;
@@ -70,7 +71,8 @@ describe("GeminiVideoGenerator", () => {
     const request = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
     const body = JSON.parse(request.body as string);
     expect(body.input).toEqual([{ type: "text", text: "[0-10s] scene" }]);
-    expect(body.generation_config.video_config.task).toBe("text_to_video");
+    expect(body.generation_config.video_config).toEqual({});
+    expect(body.response_format.duration).toBe("10s");
   });
 
   it("同じ映画生成内では同一URLを1回だけ取得する", async () => {

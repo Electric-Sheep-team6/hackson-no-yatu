@@ -27,14 +27,13 @@ const videoContentSchema = z.object({
 });
 
 const interactionSchema = z.object({
-  id: z.string().min(1),
-  output_video: videoContentSchema.optional(),
-  steps: z.array(
-    z.object({
-      type: z.string(),
-      content: z.array(z.unknown()).optional(),
-    }),
-  ).optional(),
+  // 2026-09のREST応答ではidが省略される場合がある。
+  id: z.string().min(1).optional(),
+  created: z.union([z.string(), z.number()]).optional(),
+  output_video: videoContentSchema.nullish(),
+  // thought等のstepはcontent形状が動画stepと異なるため、必要な
+  // model_outputだけを後段で狭める。
+  steps: z.array(z.unknown()).nullish(),
 });
 
 const geminiErrorSchema = z.object({
@@ -78,12 +77,13 @@ function findStepVideo(
   interaction: GeminiInteraction,
 ) {
   const content = interaction.steps
-    ?.filter(
-      (step) => step.type === "model_output",
-    )
-    .flatMap(
-      (step) => step.content ?? [],
-    )
+    ?.flatMap((step) => {
+      if (!step || typeof step !== "object") return [];
+      const value = step as Record<string, unknown>;
+      return value.type === "model_output" && Array.isArray(value.content)
+        ? value.content
+        : [];
+    })
     .findLast(
       (item) =>
         videoContentSchema.safeParse(item).success,
@@ -234,18 +234,15 @@ implements VideoGenerator {
             },
           ],
           generation_config: {
-            video_config: {
-              task:
-                references.length > 0
-                  ? "reference_to_video"
-                  : "text_to_video",
-            },
+            video_config: {},
           },
           response_format: {
             type: "video",
             aspect_ratio: "16:9",
             resolution: "720p",
+            duration: `${input.duration}s`,
           },
+          store: false,
         }),
         signal: AbortSignal.timeout(
           VIDEO_REQUEST_TIMEOUT_MS,
@@ -260,12 +257,21 @@ implements VideoGenerator {
       );
     }
 
-    const parsed =
-      interactionSchema.safeParse(
-        await response.json(),
-      );
+    const responseJson = await response.json();
+    const parsed = interactionSchema.safeParse(responseJson);
 
     if (!parsed.success) {
+      const value = responseJson && typeof responseJson === "object"
+        ? responseJson as Record<string, unknown>
+        : {};
+      console.error(JSON.stringify({
+        stage: "gemini_video_response_schema",
+        keys: Object.keys(value),
+        idType: typeof value.id,
+        outputVideoType: value.output_video === null ? "null" : typeof value.output_video,
+        stepsType: Array.isArray(value.steps) ? "array" : value.steps === null ? "null" : typeof value.steps,
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path, code: issue.code })),
+      }));
       throw new Error(
         "Gemini 動画生成の応答を読み取れませんでした",
       );
@@ -277,7 +283,7 @@ implements VideoGenerator {
       );
 
     return {
-      providerJobId: parsed.data.id,
+      providerJobId: parsed.data.id ?? `gemini-${parsed.data.created ?? "completed"}`,
       videoData,
     };
   }
