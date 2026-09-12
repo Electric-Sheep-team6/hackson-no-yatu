@@ -12,13 +12,18 @@ afterEach(() => {
 describe("GeminiVideoGenerator", () => {
   it("sends private reference images to Gemini and decodes the returned MP4", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const mp4 = new Uint8Array([
+      0, 0, 0, 12,
+      0x66, 0x74, 0x79, 0x70,
+      0x69, 0x73, 0x6f, 0x6d,
+    ]);
     global.fetch = vi.fn()
       .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/jpeg" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         id: "interaction-1",
         steps: [
           { content: [{ type: "text", data: "ignored" }] },
-          { content: [{ type: "video", data: "AQID" }] },
+          { content: [{ type: "video", data: Buffer.from(mp4).toString("base64") }] },
         ],
       }), { status: 200 })) as typeof fetch;
 
@@ -28,7 +33,7 @@ describe("GeminiVideoGenerator", () => {
       referenceImageUrls: ["https://storage.example.com/photo.jpg"],
     });
 
-    expect(result).toEqual({ providerJobId: "interaction-1", videoData: new Uint8Array([1, 2, 3]) });
+    expect(result).toEqual({ providerJobId: "interaction-1", videoData: mp4 });
     const [, request] = vi.mocked(global.fetch).mock.calls[1];
     expect(request).toMatchObject({ method: "POST", headers: expect.objectContaining({ "x-goog-api-key": "test-key" }) });
     expect(JSON.parse((request as RequestInit).body as string)).toMatchObject({
@@ -45,6 +50,22 @@ describe("GeminiVideoGenerator", () => {
     }), { status: 200 })) as typeof fetch;
 
     await expect(new GeminiVideoGenerator().generateScene({ prompt: "scene", duration: 5, referenceImageUrls: [] })).rejects.toThrow("Gemini から動画データが返されませんでした");
+  });
+
+  it("Base64として復号できてもMP4ではない動画データを拒否する", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "interaction-1",
+      steps: [{ content: [{ type: "video", data: "AQIDBAUGBwgJCgsM" }] }],
+    }), { status: 200 })) as typeof fetch;
+
+    await expect(
+      new GeminiVideoGenerator().generateScene({
+        prompt: "scene",
+        duration: 5,
+        referenceImageUrls: [],
+      }),
+    ).rejects.toThrow("Gemini から有効なMP4動画が返されませんでした");
   });
 
   it("画像ではない参照ファイルを拒否する", async () => {

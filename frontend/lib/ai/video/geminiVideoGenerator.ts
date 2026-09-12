@@ -10,6 +10,18 @@ type GeminiInteraction = {
   error?: { message?: string };
 };
 
+function decodeMp4Data(value: string) {
+  const video = Buffer.from(value, "base64");
+  if (
+    video.byteLength < 12 ||
+    video.subarray(4, 8).toString("ascii") !== "ftyp"
+  ) {
+    throw new Error("Gemini から有効なMP4動画が返されませんでした");
+  }
+
+  return new Uint8Array(video);
+}
+
 async function readReferenceImage(response: Response): Promise<Buffer> {
   const declaredSize = Number(response.headers.get("content-length") ?? 0);
   if (declaredSize > MAX_REFERENCE_IMAGE_BYTES) {
@@ -73,7 +85,7 @@ export class GeminiVideoGenerator implements VideoGenerator {
       .find((content) => content.type === "video")
       ?.data;
     if (!interaction.id || !videoData) throw new Error("Gemini から動画データが返されませんでした");
-    return { providerJobId: interaction.id, videoData: new Uint8Array(Buffer.from(videoData, "base64")) };
+    return { providerJobId: interaction.id, videoData: decodeMp4Data(videoData) };
   }
 }
 
