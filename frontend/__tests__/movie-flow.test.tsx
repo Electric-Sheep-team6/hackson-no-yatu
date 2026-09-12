@@ -1,5 +1,6 @@
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   renderHook,
@@ -41,6 +42,7 @@ describe("useMovieFlow", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     global.fetch = originalFetch;
   });
 
@@ -273,5 +275,64 @@ describe("useMovieFlow", () => {
         "1枚は保存しましたが、残りの写真を保存できませんでした。",
       ),
     ).toBeDefined();
+  });
+
+  it("前の映画状態リクエストが完了するまで次のポーリングを開始しない", async () => {
+    let resolveMovieStatus: ((response: Response) => void) | undefined;
+    let statusRequestCount = 0;
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = typeof input === "string" ? input : input.toString();
+        if (init?.method === "POST" && path === "/api/movies") {
+          return Response.json(
+            { id: "movie-1", status: "pending" },
+            { status: 201 },
+          );
+        }
+        if (path === "/api/movies/movie-1") {
+          statusRequestCount += 1;
+          return new Promise<Response>((resolve) => {
+            resolveMovieStatus = resolve;
+          });
+        }
+        if (path === "/api/obsessions") {
+          return Response.json({
+            items: [
+              {
+                id: "obsession-1",
+                title: "夜道",
+                reason: "繰り返し現れるため",
+              },
+            ],
+          });
+        }
+        return Response.json({ items: [] });
+      },
+    ) as typeof fetch;
+
+    const { result } = renderHook(() => useMovieFlow());
+    await waitFor(() => expect(result.current.obsession).not.toBeNull());
+
+    vi.useFakeTimers();
+    await act(async () => result.current.generate());
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(statusRequestCount).toBe(1);
+
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(statusRequestCount).toBe(1);
+
+    await act(async () => {
+      resolveMovieStatus?.(
+        Response.json({
+          id: "movie-1",
+          status: "completed",
+          errorMessage: null,
+          videoUrl: "https://example.com/movie.mp4",
+          movie: null,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(result.current.movie?.status).toBe("completed");
   });
 });

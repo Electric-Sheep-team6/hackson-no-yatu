@@ -487,31 +487,49 @@ export function useMovieFlow() {
   useEffect(() => {
     if (!movie || ["completed", "failed"].includes(movie.status)) return;
 
-    const timer = window.setInterval(async () => {
-      const response = await fetch(`/api/movies/${movie.id}`);
+    let cancelled = false;
+    let requestInFlight = false;
 
-      if (!response.ok) return;
+    const pollMovie = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
 
-      const next = (await response.json()) as Movie;
+      try {
+        const response = await fetch(`/api/movies/${movie.id}`);
 
-      setMovie(next);
+        if (cancelled || !response.ok) return;
 
-      if (["completed", "failed"].includes(next.status)) {
-        setBusy(null);
+        const next = (await response.json()) as Movie;
+        if (cancelled) return;
 
-        if (next.status === "completed") {
-          showMessage("映画が完成しました。", "success", "movie");
-        } else {
-          showMessage(
-            next.errorMessage ?? "映画生成に失敗しました。",
-            "error",
-            "movie",
-          );
+        setMovie(next);
+
+        if (["completed", "failed"].includes(next.status)) {
+          setBusy(null);
+
+          if (next.status === "completed") {
+            showMessage("映画が完成しました。", "success", "movie");
+          } else {
+            showMessage(
+              next.errorMessage ?? "映画生成に失敗しました。",
+              "error",
+              "movie",
+            );
+          }
         }
+      } catch {
+        // Transient network failures are retried by the next polling interval.
+      } finally {
+        requestInFlight = false;
       }
-    }, 2_000);
+    };
 
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => void pollMovie(), 2_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [movie, showMessage]);
 
   useEffect(() => {
