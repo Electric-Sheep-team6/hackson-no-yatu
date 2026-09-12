@@ -296,4 +296,122 @@ describe("POST /api/movies", () => {
       }),
     );
   });
+
+  it("途中失敗時に保存済みシーン動画を削除して孤立させない", async () => {
+    createClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+    });
+
+    const movieId = "22222222-2222-4222-8222-222222222222";
+    const obsessionId = "11111111-1111-4111-8111-111111111111";
+    const statuses: unknown[] = [];
+    const update = vi.fn((values: Record<string, unknown>) => {
+      if (values.status) statuses.push(values.status);
+      return {
+        eq: vi.fn(() => ({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+        })),
+      };
+    });
+    const insert = vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn().mockResolvedValue({
+          data: { id: movieId, status: "pending" },
+          error: null,
+        }),
+      })),
+    }));
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    const admin = {
+      rpc: vi.fn().mockResolvedValue({ data: 0, error: null }),
+      from: vi.fn((table: string) => {
+        if (table === "obsessions") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: {
+                    id: obsessionId,
+                    user_id: "user-1",
+                    analysis_json: { title: "夜道への偏愛" },
+                  },
+                  error: null,
+                }),
+              })),
+            })),
+          };
+        }
+        if (table === "photos") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+                })),
+              })),
+            })),
+          };
+        }
+        return { insert, update };
+      }),
+      storage: {
+        from: vi.fn((bucket: string) =>
+          bucket === "photos"
+            ? { createSignedUrl: vi.fn() }
+            : { upload, remove },
+        ),
+      },
+    };
+    createAdminClientMock.mockReturnValue(admin);
+
+    generateMovieScriptMock.mockResolvedValue({
+      title: "夜道の映画",
+      logline: "雨上がりの夜道を歩く。",
+      synopsis: "夜道の記憶をたどる短編。",
+      visualStyle: "cinematic",
+      bgm: "ambient",
+      scenes: [1, 2, 3].map((order) => ({
+        order,
+        source: `scene-${order}`,
+        duration: 5,
+        narration: `narration-${order}`,
+        videoPrompt: `prompt-${order}`,
+        referencePhotoUrls: [],
+      })),
+    });
+    generateSceneMock
+      .mockResolvedValueOnce({
+        providerJobId: "job-1",
+        videoData: new Uint8Array([1]),
+      })
+      .mockRejectedValueOnce(new Error("provider unavailable"));
+
+    const response = await POST(
+      new Request("http://localhost/api/movies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ obsessionId }),
+      }),
+    );
+    const backgroundJob = afterMock.mock.calls[0][0] as () => Promise<void>;
+    await backgroundJob();
+
+    expect(response.status).toBe(201);
+    expect(statuses).toEqual([
+      "analyzing",
+      "generating",
+      "processing",
+      "failed",
+    ]);
+    expect(remove).toHaveBeenCalledWith([
+      "user-1/22222222-2222-4222-8222-222222222222/scenes/1.mp4",
+    ]);
+    expect(composeMovieMock).not.toHaveBeenCalled();
+  });
 });

@@ -21,6 +21,7 @@ async function processMovieGeneration(
 ) {
   const admin = createAdminClient();
   let stage: Parameters<typeof formatMovieGenerationError>[0] = "写真の準備";
+  const uploadedMoviePaths: string[] = [];
 
   try {
     let result = await admin
@@ -87,6 +88,7 @@ async function processMovieGeneration(
         .from("movies")
         .upload(path, generated.videoData, { contentType: "video/mp4", upsert: true });
       if (uploadError) throw uploadError;
+      uploadedMoviePaths.push(path);
       generatedScenes.push({ order: scene.order, path, providerJobId: generated.providerJobId });
       sceneVideos.push(generated.videoData);
 
@@ -108,6 +110,7 @@ async function processMovieGeneration(
       { contentType: "video/mp4", upsert: true },
     );
     if (finalUploadError) throw finalUploadError;
+    uploadedMoviePaths.push(finalPath);
 
     result = await admin
       .from("movies")
@@ -133,7 +136,23 @@ async function processMovieGeneration(
       .eq("id", movieId)
       .eq("user_id", userId);
 
-    if (updateError) console.error(updateError);
+    if (updateError) {
+      console.error(updateError);
+      return;
+    }
+
+    if (uploadedMoviePaths.length > 0) {
+      const { error: cleanupError } = await admin.storage
+        .from("movies")
+        .remove(uploadedMoviePaths);
+      if (cleanupError) {
+        console.error("Failed to remove incomplete movie files", {
+          movieId,
+          uploadedMoviePaths,
+          cleanupError,
+        });
+      }
+    }
   }
 }
 
