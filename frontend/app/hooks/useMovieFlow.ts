@@ -357,13 +357,24 @@ export function useMovieFlow() {
           "library",
         );
       } catch (error) {
-        revokePhotoPreviews(previews);
-
-        showMessage(
-          error instanceof Error ? error.message : "写真を保存できませんでした。",
-          "error",
-          "library",
-        );
+        if (previews.length > 0) {
+          setNewPhotos((current) => [...previews, ...current]);
+          setPhotoCount((count) => count + previews.length);
+          showMessage(
+            `${previews.length}枚は保存しましたが、残りの写真を保存できませんでした。`,
+            "error",
+            "library",
+          );
+        } else {
+          revokePhotoPreviews(previews);
+          showMessage(
+            error instanceof Error
+              ? error.message
+              : "写真を保存できませんでした。",
+            "error",
+            "library",
+          );
+        }
       } finally {
         setUploadProgress(null);
         setBusy(null);

@@ -1,4 +1,5 @@
 import {
+  cleanup,
   fireEvent,
   render,
   renderHook,
@@ -39,6 +40,7 @@ describe("useMovieFlow", () => {
   });
 
   afterEach(() => {
+    cleanup();
     global.fetch = originalFetch;
   });
 
@@ -230,5 +232,46 @@ describe("useMovieFlow", () => {
     expect(container.querySelector("video")?.getAttribute("src")).toBe(
       "https://example.com/movie.mp4",
     );
+  });
+
+  it("複数画像の途中で失敗しても保存済み画像を画面へ反映する", async () => {
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = typeof input === "string" ? input : input.toString();
+        if (init?.method === "POST" && path === "/api/photos") {
+          return Response.json({ id: "photo-1" }, { status: 201 });
+        }
+        return Response.json({ items: [] });
+      },
+    ) as typeof fetch;
+    uploadMock
+      .mockResolvedValueOnce({ error: null })
+      .mockResolvedValueOnce({ error: new Error("storage unavailable") });
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:first-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const { container } = render(<MovieApp />);
+    await screen.findByText("saku@example.com");
+
+    const photoInput = container.querySelector<HTMLInputElement>(
+      'input[type="file"]',
+    );
+    expect(photoInput).not.toBeNull();
+    const first = new File([new Uint8Array([1])], "first.jpg", {
+      type: "image/jpeg",
+    });
+    const second = new File([new Uint8Array([2])], "second.jpg", {
+      type: "image/jpeg",
+    });
+    fireEvent.change(photoInput!, { target: { files: [first, second] } });
+
+    await screen.findByAltText("first.jpg");
+    expect(screen.queryByAltText("second.jpg")).toBeNull();
+    expect(screen.getByText("保存済み: 1枚")).toBeDefined();
+    expect(
+      screen.getByText(
+        "1枚は保存しましたが、残りの写真を保存できませんでした。",
+      ),
+    ).toBeDefined();
   });
 });
