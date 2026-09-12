@@ -57,6 +57,30 @@ describe("日記・写真投稿API", () => {
     });
   });
 
+  it("空白だけの日記を保存しない", async () => {
+    const from = vi.fn();
+    createClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from,
+    });
+
+    const response = await createDiary(
+      new Request("http://localhost/api/diaries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "  \n\t  " }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
   it("本人のStorageパスだけを写真メタデータとして保存する", async () => {
     const insert = vi.fn(() => ({
       select: vi.fn(() => ({
