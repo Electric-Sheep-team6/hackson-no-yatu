@@ -18,15 +18,6 @@ export async function POST() {
     }
 
     const admin = createAdminClient();
-    const { data: claimed, error: claimError } = await admin.rpc(
-      "claim_obsession_analysis",
-      { p_user_id: user.id },
-    );
-    if (claimError) throw claimError;
-    if (!claimed) {
-      throw new ApiError(429, "rate_limited", "偏愛分析は24時間に10回までです");
-    }
-
     const [diariesResult, photosResult] = await Promise.all([
       supabase
         .from("diaries")
@@ -62,6 +53,15 @@ export async function POST() {
       if (error || !data) throw error ?? new Error("Failed to sign photo URL");
       return data.signedUrl;
     });
+
+    const { data: claimed, error: claimError } = await admin.rpc(
+      "claim_obsession_analysis",
+      { p_user_id: user.id },
+    );
+    if (claimError) throw claimError;
+    if (!claimed) {
+      throw new ApiError(429, "rate_limited", "偏愛分析は24時間に10回までです");
+    }
 
     const analysis = await analyzeObsession({
       diaryTexts: [...diariesResult.data]
