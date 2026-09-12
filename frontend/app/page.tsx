@@ -20,15 +20,29 @@ const defaultQuestions = [
 export default function Home() {
   const [diary, setDiary] = useState("");
   const [uploadedMedia, setUploadedMedia] = useState<MediaItem[]>([]);
+  const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
   const [isAnalyzed, setIsAnalyzed] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const activeMedia = useMemo(
+    () => uploadedMedia.find((item) => item.id === activeMediaId) ?? uploadedMedia[0] ?? null,
+    [activeMediaId, uploadedMedia],
+  );
+
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const makeId = () => {
+      if (typeof crypto !== "undefined" && "randomUUID" in crypto && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
+
+      return `media-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    };
+
     const nextMedia: MediaItem[] = Array.from(event.target.files ?? []).map((file) => {
       const isVideo = file.type.startsWith("video");
 
       return {
-        id: crypto.randomUUID(),
+        id: makeId(),
         name: file.name,
         type: isVideo ? "video" : "image",
         previewUrl: isVideo ? undefined : URL.createObjectURL(file),
@@ -37,6 +51,9 @@ export default function Home() {
 
     if (nextMedia.length > 0) {
       setUploadedMedia((prev) => [...prev, ...nextMedia]);
+      if (!activeMediaId && nextMedia[0]) {
+        setActiveMediaId(nextMedia[0].id);
+      }
       event.target.value = "";
     }
   };
@@ -146,18 +163,30 @@ export default function Home() {
                         まだアップロードされていません
                       </span>
                     ) : (
-                      uploadedMedia.map((item) => (
-                        <div key={item.id} className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
-                          {item.type === "image" && item.previewUrl ? (
-                            <img src={item.previewUrl} alt={item.name} className="h-24 w-full object-cover" />
-                          ) : (
-                            <div className="flex h-24 w-full items-center justify-center bg-gradient-to-br from-violet-500/20 to-cyan-500/10 text-xs uppercase tracking-[0.2em] text-cyan-100">
-                              video
-                            </div>
-                          )}
-                          <div className="truncate px-2.5 py-2 text-[11px] text-slate-200">{item.name}</div>
-                        </div>
-                      ))
+                      uploadedMedia.map((item) => {
+                        const isSelected = activeMediaId === item.id;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => setActiveMediaId(item.id)}
+                            className={`overflow-hidden rounded-2xl border text-left transition ${
+                              isSelected ? "border-cyan-400/70 bg-cyan-500/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"
+                            }`}
+                          >
+                            {item.type === "image" && item.previewUrl ? (
+                              <img src={item.previewUrl} alt={item.name} className="h-24 w-full object-cover" />
+                            ) : (
+                              <div className="flex h-24 w-full items-center justify-center bg-gradient-to-br from-violet-500/20 to-cyan-500/10 text-xs uppercase tracking-[0.2em] text-cyan-100">
+                                video
+                              </div>
+                            )}
+                            <div className="truncate px-2.5 py-2 text-[11px] text-slate-200">{item.name}</div>
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -311,20 +340,24 @@ export default function Home() {
               </div>
 
               <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.25),transparent_25%),linear-gradient(135deg,_#0f172a,_#111827_40%,_#09090b)] p-6">
-                <div className="aspect-video rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,_rgba(15,23,42,0.25),_rgba(2,6,23,0.9)),linear-gradient(135deg,_rgba(59,130,246,0.15),_rgba(168,85,247,0.08))] p-5">
-                  <div className="flex h-full flex-col justify-end">
+                <div className="relative aspect-video overflow-hidden rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,_rgba(15,23,42,0.25),_rgba(2,6,23,0.9)),linear-gradient(135deg,_rgba(59,130,246,0.15),_rgba(168,85,247,0.08))] p-5">
+                  {activeMedia && activeMedia.type === "image" && activeMedia.previewUrl ? (
+                    <img src={activeMedia.previewUrl} alt={activeMedia.name} className="absolute inset-0 h-full w-full object-cover" />
+                  ) : null}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-black/15" />
+                  <div className="relative flex h-full flex-col justify-end">
                     <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">
                       {uploadedMedia.length > 0 ? "material-driven" : "waiting for upload"}
                     </p>
-                    <p className="mt-2 text-xl font-semibold text-white">
-                      {uploadedMedia.length > 0 ? "アップロードした記録から生成される予告編" : "写真と動画をアップロードすると、ここに予告編が生まれます"}
+                    <p className="mt-2 max-w-md text-xl font-semibold text-white">
+                      {uploadedMedia.length > 0 ? `${activeMedia?.name ?? "選択中の素材"} を映画の素材として使っています` : "写真と動画をアップロードすると、ここに予告編が生まれます"}
                     </p>
                   </div>
                 </div>
                 <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 via-black/30 to-transparent p-5">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Made in 冥途</p>
-                    <p className="mt-1 text-xl font-semibold text-white">自分だけの記憶を一本の映画にする</p>
+                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">予告編</p>
+                    <p className="mt-1 text-xl font-semibold text-white">{activeMedia ? activeMedia.name : "記憶の断片を、最後の映画へ。"}</p>
                   </div>
                   <button className="rounded-full bg-white/15 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm">
                     再生
@@ -394,12 +427,16 @@ export default function Home() {
 
           <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
             <div className="overflow-hidden rounded-[28px] border border-white/10 bg-[#0a0f17]">
-              <div className="aspect-video bg-[radial-gradient(circle_at_center,_rgba(56,189,248,0.2),_transparent_40%),linear-gradient(135deg,_#0f172a,_#111827_45%,_#020617)] p-4">
-                <div className="flex h-full items-end justify-between rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,_rgba(3,7,18,0.15),_rgba(2,6,23,0.9),_rgba(2,6,23,0.9))] p-5">
+              <div className="relative aspect-video overflow-hidden bg-[radial-gradient(circle_at_center,_rgba(56,189,248,0.2),_transparent_40%),linear-gradient(135deg,_#0f172a,_#111827_45%,_#020617)] p-4">
+                {activeMedia && activeMedia.type === "image" && activeMedia.previewUrl ? (
+                  <img src={activeMedia.previewUrl} alt={activeMedia.name} className="absolute inset-0 h-full w-full object-cover opacity-80" />
+                ) : null}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/30" />
+                <div className="relative flex h-full items-end justify-between rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,_rgba(3,7,18,0.15),_rgba(2,6,23,0.9),_rgba(2,6,23,0.9))] p-5">
                   <div>
                     <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">素材ベース</p>
                     <p className="mt-2 text-2xl font-semibold text-white">
-                      {uploadedMedia.length > 0 ? "アップロードした場面が再生中" : "アップロード待機中"}
+                      {uploadedMedia.length > 0 ? activeMedia?.name ?? "アップロードした場面が再生中" : "アップロード待機中"}
                     </p>
                   </div>
                   <div className="rounded-full border border-white/20 bg-black/30 px-3 py-1 text-xs text-white backdrop-blur-sm">
