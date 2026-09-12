@@ -73,4 +73,36 @@ describe("AI generation", () => {
     expect(request.input[0].content[0].text).toContain("雨上がりの帰り道");
     expect(request.text.format.type).toBe("json_schema");
   });
+
+  it("映画構成が返した未入力の参照 URL を除外する", async () => {
+    responsesParse.mockResolvedValue({
+      output_parsed: {
+        title: "雨のあと",
+        logline: "帰り道に見つけた静かな安心。",
+        synopsis: "雨上がりの街を歩く短編映画です。",
+        visualStyle: "soft blue cinematic light",
+        bgm: "quiet piano",
+        scenes: [{
+          order: 1,
+          source: "駅前",
+          duration: 5,
+          narration: "水たまりが光る。",
+          videoPrompt: "A single continuous cinematic shot, no scene transitions.",
+          referencePhotoUrls: [
+            "https://example.com/allowed.jpg",
+            "https://untrusted.example.com/photo.jpg",
+          ],
+        }],
+      },
+    });
+
+    const result = await generateMovieScript({
+      obsession: analysis,
+      photoUrls: ["https://example.com/allowed.jpg"],
+    });
+
+    expect(result.scenes[0].referencePhotoUrls).toEqual([
+      "https://example.com/allowed.jpg",
+    ]);
+  });
 });

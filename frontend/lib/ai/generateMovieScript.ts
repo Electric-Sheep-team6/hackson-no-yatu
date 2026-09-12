@@ -33,7 +33,9 @@ const movieScriptSchema = z.object({
     duration: z.number().int().min(3).max(10),
     narration: z.string().min(1).max(300),
     videoPrompt: z.string().min(1).max(2_000),
-    referencePhotoUrls: z.array(z.string().url()).max(3),
+    // OpenAI Structured Outputs does not accept JSON Schema's `uri` format.
+    // Validate membership in the server instead, after parsing the response.
+    referencePhotoUrls: z.array(z.string()).max(3),
   })).min(3).max(5),
 });
 
@@ -52,7 +54,17 @@ export async function generateMovieScript(
     text: { format: zodTextFormat(movieScriptSchema, "movie_script") },
   });
   if (!response.output_parsed) throw new Error("映画構成の結果を読み取れませんでした");
-  return response.output_parsed;
+
+  const allowedPhotoUrls = new Set(input.photoUrls);
+  return {
+    ...response.output_parsed,
+    scenes: response.output_parsed.scenes.map((scene) => ({
+      ...scene,
+      referencePhotoUrls: scene.referencePhotoUrls.filter((url) =>
+        allowedPhotoUrls.has(url),
+      ),
+    })),
+  };
 }
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
