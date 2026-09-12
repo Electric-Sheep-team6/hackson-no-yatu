@@ -68,12 +68,13 @@ export class GeminiVideoGenerator implements VideoGenerator {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
     const images = await Promise.all(input.referenceImageUrls.slice(0, 3).map(toImageInput));
+    const durationPrompt = `${input.prompt}\nThe generated video must be exactly ${input.duration} seconds long.`;
     const response = await fetch(INTERACTIONS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         model: GEMINI_MODEL,
-        input: [...images, { type: "text", text: input.prompt }],
+        input: [...images, { type: "text", text: durationPrompt }],
         response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p" },
       }),
       signal: AbortSignal.timeout(120_000),

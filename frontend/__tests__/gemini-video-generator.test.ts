@@ -36,9 +36,14 @@ describe("GeminiVideoGenerator", () => {
     expect(result).toEqual({ providerJobId: "interaction-1", videoData: mp4 });
     const [, request] = vi.mocked(global.fetch).mock.calls[1];
     expect(request).toMatchObject({ method: "POST", headers: expect.objectContaining({ "x-goog-api-key": "test-key" }) });
-    expect(JSON.parse((request as RequestInit).body as string)).toMatchObject({
+    const body = JSON.parse((request as RequestInit).body as string);
+    expect(body).toMatchObject({
       model: "gemini-omni-1.1-flash",
       response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p" },
+    });
+    expect(body.input.at(-1)).toEqual({
+      type: "text",
+      text: expect.stringContaining("exactly 5 seconds long"),
     });
   });
 
