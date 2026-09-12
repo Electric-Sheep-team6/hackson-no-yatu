@@ -130,7 +130,7 @@ describe("POST /api/movies", () => {
     const obsessionId = "11111111-1111-4111-8111-111111111111";
     const statuses: unknown[] = [];
     const update = vi.fn((values: Record<string, unknown>) => {
-      statuses.push(values.status);
+      if (values.status) statuses.push(values.status);
       return {
         eq: vi.fn(() => ({
           eq: vi.fn().mockResolvedValue({ error: null }),
@@ -260,6 +260,11 @@ describe("POST /api/movies", () => {
       new Uint8Array([3]),
     ]);
     expect(upload).toHaveBeenCalledTimes(4);
+    expect(
+      update.mock.calls.filter(
+        ([values]) => values.status === undefined && values.updated_at,
+      ),
+    ).toHaveLength(3);
     expect(upload).toHaveBeenLastCalledWith(
       "user-1/22222222-2222-4222-8222-222222222222.mp4",
       new Uint8Array([1, 2, 3]),

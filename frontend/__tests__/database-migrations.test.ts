@@ -138,4 +138,26 @@ describe("database migrations", () => {
     );
   });
 
+  it("進捗更新から6分間停止した映画生成だけを回収する", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0011_recover_only_inactive_movies.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("updated_at < pg_catalog.now()");
+    expect(migration).not.toContain("created_at < pg_catalog.now()");
+    expect(migration).toContain("interval '6 minutes'");
+    expect(migration).toContain("security definer");
+    expect(migration).toContain("set search_path = ''");
+    expect(migration).toContain(
+      "revoke execute on function public.recover_stale_movie_generations(uuid) from public, anon, authenticated",
+    );
+    expect(migration).toContain(
+      "grant execute on function public.recover_stale_movie_generations(uuid) to service_role",
+    );
+  });
+
 });

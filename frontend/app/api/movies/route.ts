@@ -89,6 +89,13 @@ async function processMovieGeneration(
       if (uploadError) throw uploadError;
       generatedScenes.push({ order: scene.order, path, providerJobId: generated.providerJobId });
       sceneVideos.push(generated.videoData);
+
+      result = await admin
+        .from("movies")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", movieId)
+        .eq("user_id", userId);
+      if (result.error) throw result.error;
     }
 
     stage = "映像の結合";
