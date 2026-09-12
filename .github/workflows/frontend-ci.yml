@@ -6,10 +6,12 @@ on:
       - main
     paths:
       - "frontend/**"
+      - "supabase/**"
       - ".github/workflows/frontend-ci.yml"
   pull_request:
     paths:
       - "frontend/**"
+      - "supabase/**"
       - ".github/workflows/frontend-ci.yml"
 
 permissions:
