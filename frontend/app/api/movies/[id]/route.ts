@@ -1,0 +1,65 @@
+import { NextResponse } from "next/server";
+
+import type { MovieScript } from "@/lib/ai/generateMovieScript";
+import { ApiError, errorResponse } from "@/lib/apiError";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { movieIdSchema } from "@/lib/validation";
+
+type RouteContext = {
+  params: Promise<{ id: string }>;
+};
+
+export async function GET(_request: Request, context: RouteContext) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      throw new ApiError(401, "unauthorized", "ログインが必要です");
+    }
+
+    const { id } = await context.params;
+    const movieId = movieIdSchema.parse(id);
+    const { error: staleMovieError } = await createAdminClient().rpc(
+      "recover_stale_movie_generations",
+      { p_user_id: user.id },
+    );
+    if (staleMovieError) throw staleMovieError;
+
+    const { data: movie, error } = await supabase
+      .from("movies")
+      .select("id, status, video_path, error_message, movie_json")
+      .eq("id", movieId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!movie) {
+      throw new ApiError(404, "not_found", "映画が見つかりません");
+    }
+
+    let videoUrl: string | null = null;
+    if (movie.status === "completed" && movie.video_path) {
+      const { data: signedVideo, error: signedVideoError } = await supabase.storage
+        .from("movies")
+        .createSignedUrl(movie.video_path, 3600);
+      if (signedVideoError) throw signedVideoError;
+      videoUrl = signedVideo?.signedUrl ?? null;
+    }
+
+    return NextResponse.json({
+      id: movie.id,
+      status: movie.status,
+      videoPath: movie.video_path,
+      videoUrl,
+      errorMessage: movie.error_message,
+      movie: movie.movie_json as MovieScript | null,
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return errorResponse(error, { route: "GET /api/movies/[id]" });
+  }
+}

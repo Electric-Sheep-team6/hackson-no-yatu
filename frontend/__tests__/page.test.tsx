@@ -1,57 +1,46 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { getUserMock, redirectMock, routerReplaceMock, routerRefreshMock } = vi.hoisted(() => ({
+  getUserMock: vi.fn(),
+  redirectMock: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
+  routerReplaceMock: vi.fn(),
+  routerRefreshMock: vi.fn(),
+}));
+
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: async () => ({ auth: { getUser: getUserMock } }),
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: redirectMock,
+  useRouter: () => ({ replace: routerReplaceMock, refresh: routerRefreshMock }),
+}));
 
 import Home from "@/app/page";
 
 describe("Home", () => {
-  it("renders the LAST SCREEN product flow", () => {
-    render(<Home />);
-
-    expect(
-      screen.getByRole("heading", {
-        level: 1,
-        name: /Made in 冥途/i,
-      }),
-    ).toBeDefined();
-    expect(screen.getByLabelText(/今日の出来事/i)).toBeDefined();
-    expect(screen.getByText("ログインなしで利用可能")).toBeDefined();
-    expect(screen.getByRole("link", { name: "ログイン" }).getAttribute("href")).toBe("/login");
-    expect(screen.getByRole("link", { name: "新規登録" }).getAttribute("href")).toBe("/signup");
-    expect(screen.getByRole("button", { name: /偏愛を分析/i })).toBeDefined();
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("adds uploaded media even when crypto.randomUUID is unavailable", () => {
-    const originalCrypto = globalThis.crypto;
-    const originalCreateObjectURL = globalThis.URL.createObjectURL;
+  it("does not render the product UI for an unauthenticated request", async () => {
+    getUserMock.mockResolvedValue({ data: { user: null } });
 
-    Object.defineProperty(globalThis, "crypto", {
-      value: {},
-      configurable: true,
-    });
-    Object.defineProperty(globalThis.URL, "createObjectURL", {
-      value: vi.fn(() => "/preview.png"),
-      configurable: true,
-    });
+    await expect(Home()).rejects.toThrow("NEXT_REDIRECT:/login");
+    expect(redirectMock).toHaveBeenCalledWith("/login");
+  });
 
-    try {
-      render(<Home />);
+  it("renders the LAST SCREEN product flow for an authenticated user", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { email: "viewer@example.com" } } });
+    render(await Home());
 
-      const input = document.querySelector('input[type="file"]');
-      expect(input).toBeTruthy();
-
-      const file = new File(["hello"], "sample.png", { type: "image/png" });
-      fireEvent.change(input!, { target: { files: [file] } });
-
-      expect(screen.getAllByText("sample.png").length).toBeGreaterThan(0);
-    } finally {
-      Object.defineProperty(globalThis, "crypto", {
-        value: originalCrypto,
-        configurable: true,
-      });
-      Object.defineProperty(globalThis.URL, "createObjectURL", {
-        value: originalCreateObjectURL,
-        configurable: true,
-      });
-    }
+    expect(screen.getByRole("heading", { level: 1, name: /人生の最終上映/i })).toBeDefined();
+    expect(screen.getByText("viewer@example.com")).toBeDefined();
+    expect(screen.getByLabelText(/今日の記憶/i)).toBeDefined();
+    expect(screen.getByRole("button", { name: /わたしの偏愛を見つける/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /人生の映画をつくる/i })).toBeDefined();
   });
 });
