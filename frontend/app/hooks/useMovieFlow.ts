@@ -338,7 +338,17 @@ export function useMovieFlow() {
           });
 
           if (!response.ok) {
-            throw new Error(await responseError(response));
+            const message = await responseError(response);
+            const { error: cleanupError } = await supabase.storage
+              .from("photos")
+              .remove([storagePath]);
+            if (cleanupError) {
+              console.error("Failed to remove orphaned photo", {
+                storagePath,
+                cleanupError,
+              });
+            }
+            throw new Error(message);
           }
 
           previews.push({

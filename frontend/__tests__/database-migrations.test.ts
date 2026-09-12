@@ -121,4 +121,21 @@ describe("database migrations", () => {
     expect(migration).toContain("public = excluded.public");
   });
 
+  it("利用者がメタデータ保存に失敗した自分の写真を削除できる", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0010_allow_photo_cleanup.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("on storage.objects for delete");
+    expect(migration).toContain("to authenticated");
+    expect(migration).toContain("bucket_id = 'photos'");
+    expect(migration).toContain(
+      "(storage.foldername(name))[1] = auth.uid()::text",
+    );
+  });
+
 });

@@ -23,10 +23,12 @@ vi.mock("@/lib/supabase/client", () => ({
 const originalFetch = global.fetch;
 
 describe("useMovieFlow", () => {
+  const removeMock = vi.fn();
   const uploadMock = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    removeMock.mockResolvedValue({ error: null });
     uploadMock.mockResolvedValue({ error: null });
     createClientMock.mockReturnValue({
       auth: {
@@ -35,7 +37,7 @@ describe("useMovieFlow", () => {
         }),
       },
       storage: {
-        from: vi.fn(() => ({ upload: uploadMock })),
+        from: vi.fn(() => ({ remove: removeMock, upload: uploadMock })),
       },
     });
   });
@@ -334,5 +336,37 @@ describe("useMovieFlow", () => {
       await Promise.resolve();
     });
     expect(result.current.movie?.status).toBe("completed");
+  });
+
+  it("写真メタデータの保存失敗時にStorage上の孤立ファイルを削除する", async () => {
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = typeof input === "string" ? input : input.toString();
+        if (init?.method === "POST" && path === "/api/photos") {
+          return Response.json(
+            { message: "写真を記録できませんでした" },
+            { status: 500 },
+          );
+        }
+        return Response.json({ items: [] });
+      },
+    ) as typeof fetch;
+
+    const { result } = renderHook(() => useMovieFlow());
+    await waitFor(() => expect(result.current.userEmail).not.toBeNull());
+    const photo = new File([new Uint8Array([1])], "orphan.jpg", {
+      type: "image/jpeg",
+    });
+
+    await act(async () => {
+      await result.current.uploadPhotos({
+        target: { files: [photo], value: "" },
+      } as unknown as React.ChangeEvent<HTMLInputElement>);
+    });
+
+    const storagePath = uploadMock.mock.calls[0][0] as string;
+    expect(removeMock).toHaveBeenCalledWith([storagePath]);
+    expect(result.current.photoCount).toBe(0);
+    expect(result.current.message?.text).toBe("写真を記録できませんでした");
   });
 });
