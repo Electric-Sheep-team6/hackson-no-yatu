@@ -97,9 +97,16 @@ export function useMovieFlow() {
   }, [revokePhotoPreviews]);
 
   const refreshLibrary = useCallback(async () => {
-    const [diariesResponse, photosResponse] = await Promise.all([
+    const [
+      diariesResponse,
+      photosResponse,
+      obsessionsResponse,
+      moviesResponse,
+    ] = await Promise.all([
       fetch("/api/diaries"),
       fetch("/api/photos"),
+      fetch("/api/obsessions"),
+      fetch("/api/movies"),
     ]);
 
     if (diariesResponse.ok) {
@@ -110,6 +117,33 @@ export function useMovieFlow() {
       setPhotoCount(
         ((await photosResponse.json()) as { items: unknown[] }).items.length,
       );
+    }
+
+    if (obsessionsResponse.ok) {
+      const { items } = (await obsessionsResponse.json()) as {
+        items: Obsession[];
+      };
+      setObsession(items[0] ?? null);
+    }
+
+    if (moviesResponse.ok) {
+      const { items } = (await moviesResponse.json()) as {
+        items: { id: string; status: string }[];
+      };
+      const latestMovie = items[0];
+
+      if (!latestMovie) {
+        setMovie(null);
+      } else {
+        const movieResponse = await fetch(`/api/movies/${latestMovie.id}`);
+        if (movieResponse.ok) {
+          const restoredMovie = (await movieResponse.json()) as Movie;
+          setMovie(restoredMovie);
+          if (!["completed", "failed"].includes(restoredMovie.status)) {
+            setBusy("movie");
+          }
+        }
+      }
     }
   }, []);
 
@@ -178,7 +212,7 @@ export function useMovieFlow() {
           "auth",
         );
       } finally {
-        setBusy(null);
+        setBusy((current) => (current === "auth" ? null : current));
       }
     },
     [busy, email, password, refreshLibrary, showMessage],
