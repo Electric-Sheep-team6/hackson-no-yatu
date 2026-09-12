@@ -14,7 +14,13 @@ describe("GeminiVideoGenerator", () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     global.fetch = vi.fn()
       .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/jpeg" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "interaction-1", output_video: { data: "AQID" } }), { status: 200 })) as typeof fetch;
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "interaction-1",
+        steps: [
+          { content: [{ type: "text", data: "ignored" }] },
+          { content: [{ type: "video", data: "AQID" }] },
+        ],
+      }), { status: 200 })) as typeof fetch;
 
     const result = await new GeminiVideoGenerator().generateScene({
       prompt: "A single continuous cinematic shot.",
@@ -33,7 +39,10 @@ describe("GeminiVideoGenerator", () => {
 
   it("rejects when Gemini does not return video data", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "interaction-1" }), { status: 200 })) as typeof fetch;
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "interaction-1",
+      steps: [{ content: [{ type: "text", data: "not-video-data" }] }],
+    }), { status: 200 })) as typeof fetch;
 
     await expect(new GeminiVideoGenerator().generateScene({ prompt: "scene", duration: 5, referenceImageUrls: [] })).rejects.toThrow("Gemini から動画データが返されませんでした");
   });

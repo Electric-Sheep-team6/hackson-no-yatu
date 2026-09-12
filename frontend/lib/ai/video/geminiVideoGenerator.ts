@@ -4,7 +4,11 @@ const GEMINI_MODEL = "gemini-omni-1.1-flash";
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
 
-type GeminiInteraction = { id?: string; output_video?: { data?: string }; error?: { message?: string } };
+type GeminiInteraction = {
+  id?: string;
+  steps?: Array<{ content?: Array<{ type?: string; data?: string }> }>;
+  error?: { message?: string };
+};
 
 async function readReferenceImage(response: Response): Promise<Buffer> {
   const declaredSize = Number(response.headers.get("content-length") ?? 0);
@@ -64,8 +68,12 @@ export class GeminiVideoGenerator implements VideoGenerator {
     });
     const interaction = await response.json() as GeminiInteraction;
     if (!response.ok) throw new Error(interaction.error?.message ?? "Gemini 動画生成に失敗しました");
-    if (!interaction.id || !interaction.output_video?.data) throw new Error("Gemini から動画データが返されませんでした");
-    return { providerJobId: interaction.id, videoData: new Uint8Array(Buffer.from(interaction.output_video.data, "base64")) };
+    const videoData = interaction.steps
+      ?.flatMap((step) => step.content ?? [])
+      .find((content) => content.type === "video")
+      ?.data;
+    if (!interaction.id || !videoData) throw new Error("Gemini から動画データが返されませんでした");
+    return { providerJobId: interaction.id, videoData: new Uint8Array(Buffer.from(videoData, "base64")) };
   }
 }
 
