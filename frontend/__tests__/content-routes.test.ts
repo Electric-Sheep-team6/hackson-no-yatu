@@ -103,6 +103,11 @@ describe("日記・写真投稿API", () => {
         }),
       },
       from: vi.fn(() => ({ insert })),
+      storage: {
+        from: vi.fn(() => ({
+          exists: vi.fn().mockResolvedValue({ data: true, error: null }),
+        })),
+      },
     });
 
     const response = await createPhoto(
@@ -119,6 +124,33 @@ describe("日記・写真投稿API", () => {
       storage_path: "user-1/night.jpg",
       diary_id: null,
     });
+  });
+
+  it("Storageに存在しない写真をメタデータへ登録しない", async () => {
+    const from = vi.fn();
+    const exists = vi.fn().mockResolvedValue({ data: false, error: null });
+    createClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from,
+      storage: { from: vi.fn(() => ({ exists })) },
+    });
+
+    const response = await createPhoto(
+      new Request("http://localhost/api/photos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath: "user-1/missing.jpg" }),
+      }),
+    );
+
+    expect(exists).toHaveBeenCalledWith("user-1/missing.jpg");
+    expect(response.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
   });
 
   it("別ユーザーのStorageパスは保存しない", async () => {
