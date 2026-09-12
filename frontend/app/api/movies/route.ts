@@ -1,129 +1,19 @@
 import { after, NextResponse } from "next/server";
 
 import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
-import { generateMovieScript } from "@/lib/ai/generateMovieScript";
-import { composeMovie } from "@/lib/ai/video/composeMovie";
-import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
-import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { createMovieSchema } from "@/lib/validation";
 
+import { processMovieGeneration } from "./generation";
+
 export const runtime = "nodejs";
+// 通常時はシーン生成1波（最大120秒）+ 連結（最大120秒）で収まる。
+// タイムアウト再試行時は300秒を超え得るため、上限変更はプラン確認後に判断する。
 export const maxDuration = 300;
 
 const DAILY_MOVIE_LIMIT = 3;
-
-async function processMovieGeneration(
-  movieId: string,
-  userId: string,
-  obsession: ObsessionAnalysis,
-) {
-  const admin = createAdminClient();
-
-  try {
-    let result = await admin
-      .from("movies")
-      .update({ status: "analyzing", updated_at: new Date().toISOString() })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-
-    const photosResult = await admin
-      .from("photos")
-      .select("storage_path")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: true });
-    if (photosResult.error) throw photosResult.error;
-
-    const signedUrlResults = await Promise.all(
-      photosResult.data.map(({ storage_path }) =>
-        admin.storage.from("photos").createSignedUrl(storage_path, 3600),
-      ),
-    );
-    const photoUrls = signedUrlResults.map(({ data, error }) => {
-      if (error || !data) throw error ?? new Error("Failed to sign photo URL");
-      return data.signedUrl;
-    });
-
-    result = await admin
-      .from("movies")
-      .update({ status: "generating", updated_at: new Date().toISOString() })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-
-    const movie = await generateMovieScript({ obsession, photoUrls });
-
-    result = await admin
-      .from("movies")
-      .update({
-        status: "processing",
-        movie_json: movie,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-
-    const generatedScenes: { order: number; path: string; providerJobId: string }[] = [];
-    const sceneVideos: Uint8Array[] = [];
-    for (const scene of movie.scenes) {
-      const generated = await geminiVideoGenerator.generateScene({
-        prompt: scene.videoPrompt,
-        duration: scene.duration,
-        referenceImageUrls: selectReferenceImageUrls(
-          scene.referencePhotoUrls,
-          photoUrls,
-        ),
-      });
-      if (!generated.videoData) throw new Error("動画データがありません");
-      const path = `${userId}/${movieId}/scenes/${scene.order}.mp4`;
-      const { error: uploadError } = await admin.storage
-        .from("movies")
-        .upload(path, generated.videoData, { contentType: "video/mp4", upsert: true });
-      if (uploadError) throw uploadError;
-      generatedScenes.push({ order: scene.order, path, providerJobId: generated.providerJobId });
-      sceneVideos.push(generated.videoData);
-    }
-
-    const finalVideo = await composeMovie(sceneVideos);
-    const finalPath = `${userId}/${movieId}.mp4`;
-    const { error: finalUploadError } = await admin.storage.from("movies").upload(
-      finalPath,
-      finalVideo,
-      { contentType: "video/mp4", upsert: true },
-    );
-    if (finalUploadError) throw finalUploadError;
-
-    result = await admin
-      .from("movies")
-      .update({
-        status: "completed",
-        movie_json: { ...movie, generatedScenes },
-        video_path: finalPath,
-        error_message: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-  } catch (error) {
-    console.error(error);
-    const { error: updateError } = await admin
-      .from("movies")
-      .update({
-        status: "failed",
-        error_message: "動画生成に失敗しました",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-
-    if (updateError) console.error(updateError);
-  }
-}
 
 export async function POST(request: Request) {
   try {

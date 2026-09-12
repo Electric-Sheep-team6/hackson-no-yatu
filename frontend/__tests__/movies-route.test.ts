@@ -1,10 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { afterMock, createAdminClientMock, createClientMock } = vi.hoisted(
+const {
+  afterMock,
+  composeMovieMock,
+  createAdminClientMock,
+  createClientMock,
+  generateMovieScriptMock,
+  generateSceneMock,
+} = vi.hoisted(
   () => ({
     afterMock: vi.fn(),
+    composeMovieMock: vi.fn(),
     createAdminClientMock: vi.fn(),
     createClientMock: vi.fn(),
+    generateMovieScriptMock: vi.fn(),
+    generateSceneMock: vi.fn(),
   }),
 );
 
@@ -18,11 +28,90 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/lib/supabase/server", () => ({
   createClient: createClientMock,
 }));
+vi.mock("@/lib/ai/generateMovieScript", () => ({
+  generateMovieScript: generateMovieScriptMock,
+}));
+vi.mock("@/lib/ai/video/composeMovie", () => ({
+  composeMovie: composeMovieMock,
+}));
+vi.mock("@/lib/ai/video/geminiVideoGenerator", () => ({
+  geminiVideoGenerator: { generateScene: generateSceneMock },
+}));
 
 import { POST } from "@/app/api/movies/route";
+import {
+  MAX_SCENE_RETRIES,
+  processMovieGeneration,
+  SCENE_CONCURRENCY,
+} from "@/app/api/movies/generation";
+
+const MOVIE_ID = "22222222-2222-4222-8222-222222222222";
+const USER_ID = "user-1";
+
+function createScript(orders = [1, 2, 3, 4]) {
+  return {
+    title: "title",
+    logline: "logline",
+    synopsis: "synopsis",
+    visualStyle: "style",
+    bgm: "bgm",
+    scenes: orders.map((order) => ({
+      order,
+      source: `source-${order}`,
+      duration: 5,
+      narration: `narration-${order}`,
+      videoPrompt: `scene-${order}`,
+      referencePhotoUrls: [],
+    })),
+  };
+}
+
+function createGenerationAdmin() {
+  const updates: Record<string, unknown>[] = [];
+  const upload = vi.fn().mockResolvedValue({ data: {}, error: null });
+  const update = vi.fn((values: Record<string, unknown>) => {
+    updates.push(values);
+    return {
+      eq: vi.fn(() => ({
+        eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+      })),
+    };
+  });
+  const admin = {
+    from: vi.fn((table: string) => table === "photos"
+      ? {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          })),
+        }
+      : { update }),
+    storage: {
+      from: vi.fn(() => ({
+        createSignedUrl: vi.fn(),
+        upload,
+      })),
+    },
+  };
+  return { admin, updates, upload };
+}
+
+async function runGeneration() {
+  await processMovieGeneration(MOVIE_ID, USER_ID, {} as never);
+}
 
 describe("POST /api/movies", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it("実行中映画の一意制約違反を409へ変換する", async () => {
     createClientMock.mockResolvedValue({
@@ -153,5 +242,131 @@ describe("POST /api/movies", () => {
     const route = await import("@/app/api/movies/route");
 
     expect(route.maxDuration).toBe(300);
+  });
+
+  it("完了順に関係なくscene.order昇順で連結する", async () => {
+    const { admin } = createGenerationAdmin();
+    const resolvers = new Map<number, (value: {
+      providerJobId: string;
+      videoData: Uint8Array;
+    }) => void>();
+    createAdminClientMock.mockReturnValue(admin);
+    generateMovieScriptMock.mockResolvedValue(createScript([3, 1, 2, 4]));
+    generateSceneMock.mockImplementation(({ prompt }: { prompt: string }) => {
+      const order = Number(prompt.split("-")[1]);
+      return new Promise((resolve) => resolvers.set(order, resolve));
+    });
+    composeMovieMock.mockResolvedValue(new Uint8Array([9]));
+
+    const generation = runGeneration();
+    await vi.waitFor(() => expect(resolvers.size).toBe(SCENE_CONCURRENCY));
+    [3, 2, 1].forEach((order) => resolvers.get(order)?.({
+      providerJobId: `job-${order}`,
+      videoData: new Uint8Array([order]),
+    }));
+    await generation;
+
+    expect(generateSceneMock).toHaveBeenCalledTimes(3);
+    expect(composeMovieMock).toHaveBeenCalledWith([
+      new Uint8Array([1]),
+      new Uint8Array([2]),
+      new Uint8Array([3]),
+    ]);
+  });
+
+  it("シーン生成の同時実行数が上限を超えない", async () => {
+    const { admin } = createGenerationAdmin();
+    const pending: (() => void)[] = [];
+    let activeCount = 0;
+    let maxActiveCount = 0;
+    createAdminClientMock.mockReturnValue(admin);
+    generateMovieScriptMock.mockResolvedValue(createScript());
+    generateSceneMock.mockImplementation(() => new Promise((resolve) => {
+      activeCount += 1;
+      maxActiveCount = Math.max(maxActiveCount, activeCount);
+      pending.push(() => {
+        activeCount -= 1;
+        resolve({ providerJobId: "job", videoData: new Uint8Array([1]) });
+      });
+    }));
+    composeMovieMock.mockResolvedValue(new Uint8Array([9]));
+
+    const generation = runGeneration();
+    await vi.waitFor(() => expect(pending).toHaveLength(SCENE_CONCURRENCY));
+    pending.forEach((resolve) => resolve());
+    await generation;
+
+    expect(maxActiveCount).toBe(SCENE_CONCURRENCY);
+    expect(generateSceneMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("一過性エラーを上限内で再試行して成功する", async () => {
+    vi.useFakeTimers();
+    const { admin, updates } = createGenerationAdmin();
+    createAdminClientMock.mockReturnValue(admin);
+    generateMovieScriptMock.mockResolvedValue(createScript());
+    generateSceneMock.mockImplementation(async ({ prompt }: { prompt: string }) => {
+      if (prompt === "scene-1" && generateSceneMock.mock.calls.length === 1) {
+        throw { status: 429 };
+      }
+      const order = Number(prompt.split("-")[1]);
+      return { providerJobId: `job-${order}`, videoData: new Uint8Array([order]) };
+    });
+    composeMovieMock.mockResolvedValue(new Uint8Array([9]));
+
+    const generation = runGeneration();
+    await vi.runAllTimersAsync();
+    await generation;
+
+    expect(generateSceneMock).toHaveBeenCalledTimes(4);
+    expect(updates.at(-1)).toMatchObject({ status: "completed" });
+    const sceneUpdate = updates.find((value) =>
+      typeof value.movie_json === "object" && !("status" in value),
+    );
+    expect(sceneUpdate).toMatchObject({
+      movie_json: {
+        generatedScenes: expect.arrayContaining([
+          expect.objectContaining({ order: 1, retryCount: 1, status: "succeeded" }),
+        ]),
+      },
+    });
+  });
+
+  it("再試行上限超過時に失敗段階と安全な分類を保存する", async () => {
+    vi.useFakeTimers();
+    const { admin, updates } = createGenerationAdmin();
+    createAdminClientMock.mockReturnValue(admin);
+    generateMovieScriptMock.mockResolvedValue(createScript());
+    generateSceneMock.mockImplementation(async ({ prompt }: { prompt: string }) => {
+      if (prompt === "scene-2") throw { name: "AbortError" };
+      const order = Number(prompt.split("-")[1]);
+      return { providerJobId: `job-${order}`, videoData: new Uint8Array([order]) };
+    });
+    composeMovieMock.mockResolvedValue(new Uint8Array([9]));
+
+    const generation = runGeneration();
+    await vi.runAllTimersAsync();
+    await generation;
+
+    expect(generateSceneMock).toHaveBeenCalledTimes(3 + MAX_SCENE_RETRIES);
+    expect(composeMovieMock).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({
+      status: "failed",
+      error_message: "シーン2の生成に失敗しました（タイムアウト）",
+    });
+    expect(updates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        movie_json: expect.objectContaining({
+          generatedScenes: expect.arrayContaining([
+            expect.objectContaining({
+              order: 2,
+              providerJobId: null,
+              retryCount: MAX_SCENE_RETRIES,
+              status: "failed",
+            }),
+          ]),
+        }),
+      }),
+    ]));
   });
 });
