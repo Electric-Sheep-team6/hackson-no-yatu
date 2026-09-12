@@ -58,4 +58,36 @@ describe.skipIf(!systemFfmpegPath || !systemFfprobePath)("prepareHologramVideo",
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("音声を除去し、連結可能なfpsへ固定する", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "last-screen-audio-test-"));
+    try {
+      if (!systemFfmpegPath || !systemFfprobePath) throw new Error("FFmpeg is unavailable");
+      const sourcePath = join(directory, "source.mp4");
+      const outputPath = join(directory, "output.mp4");
+      // -an の効果を検証するため、音声トラックを持つ動画を用意する。
+      await execFileAsync(systemFfmpegPath, [
+        "-y", "-f", "lavfi", "-i", "color=c=black:s=1280x720:d=1",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "1",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", sourcePath,
+      ]);
+
+      const output = await prepareHologramVideo(new Uint8Array(await readFile(sourcePath)));
+      await writeFile(outputPath, output);
+
+      const { stdout: audioStreams } = await execFileAsync(systemFfprobePath, [
+        "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=index", "-of", "csv=p=0", outputPath,
+      ]);
+      expect(audioStreams.trim()).toBe("");
+
+      const { stdout: frameRate } = await execFileAsync(systemFfprobePath, [
+        "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", outputPath,
+      ]);
+      expect(frameRate.trim()).toBe("24/1");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
