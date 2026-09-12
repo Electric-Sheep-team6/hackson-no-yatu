@@ -68,6 +68,7 @@ export function useMovieFlow() {
 
   // 破棄時に revokeObjectURL するため、最新のプレビュー一覧を ref に同期しておく。
   const newPhotosRef = useRef<PhotoPreview[]>([]);
+  const libraryRefreshVersionRef = useRef(0);
 
   useEffect(() => {
     newPhotosRef.current = newPhotos;
@@ -87,6 +88,7 @@ export function useMovieFlow() {
   }, []);
 
   const clearUserData = useCallback(() => {
+    libraryRefreshVersionRef.current += 1;
     revokePhotoPreviews(newPhotosRef.current);
     newPhotosRef.current = [];
 
@@ -101,6 +103,10 @@ export function useMovieFlow() {
   }, [revokePhotoPreviews]);
 
   const refreshLibrary = useCallback(async () => {
+    const refreshVersion = libraryRefreshVersionRef.current + 1;
+    libraryRefreshVersionRef.current = refreshVersion;
+    const isCurrentRefresh = () =>
+      libraryRefreshVersionRef.current === refreshVersion;
     const fetchSafely = (path: string) => fetch(path).catch(() => null);
     const [
       diariesResponse,
@@ -113,21 +119,25 @@ export function useMovieFlow() {
       fetchSafely("/api/obsessions"),
       fetchSafely("/api/movies"),
     ]);
+    if (!isCurrentRefresh()) return;
 
     if (diariesResponse?.ok) {
-      setDiaries(((await diariesResponse.json()) as { items: Diary[] }).items);
+      const { items } = (await diariesResponse.json()) as { items: Diary[] };
+      if (!isCurrentRefresh()) return;
+      setDiaries(items);
     }
 
     if (photosResponse?.ok) {
-      setPhotoCount(
-        ((await photosResponse.json()) as { items: unknown[] }).items.length,
-      );
+      const { items } = (await photosResponse.json()) as { items: unknown[] };
+      if (!isCurrentRefresh()) return;
+      setPhotoCount(items.length);
     }
 
     if (obsessionsResponse?.ok) {
       const { items } = (await obsessionsResponse.json()) as {
         items: Obsession[];
       };
+      if (!isCurrentRefresh()) return;
       setObsession(items[0] ?? null);
     }
 
@@ -135,6 +145,7 @@ export function useMovieFlow() {
       const { items } = (await moviesResponse.json()) as {
         items: { id: string; status: string }[];
       };
+      if (!isCurrentRefresh()) return;
       const latestMovie = items[0];
 
       if (!latestMovie) {
@@ -143,6 +154,7 @@ export function useMovieFlow() {
         const movieResponse = await fetchSafely(`/api/movies/${latestMovie.id}`);
         if (movieResponse?.ok) {
           const restoredMovie = (await movieResponse.json()) as Movie;
+          if (!isCurrentRefresh()) return;
           setMovie(restoredMovie);
           if (!["completed", "failed"].includes(restoredMovie.status)) {
             setBusy("movie");

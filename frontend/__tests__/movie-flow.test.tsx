@@ -155,6 +155,60 @@ describe("useMovieFlow", () => {
     expect(result.current.userEmail).toBeNull();
   });
 
+  it("ログアウト後に遅延した旧ユーザーのライブラリを再表示しない", async () => {
+    const libraryResolvers = new Map<
+      string,
+      (response: Response) => void
+    >();
+    const signOut = vi.fn().mockResolvedValue({ error: null });
+    createClientMock.mockReturnValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1", email: "saku@example.com" } },
+        }),
+        signOut,
+      },
+      storage: {
+        from: vi.fn(() => ({ remove: removeMock, upload: uploadMock })),
+      },
+    });
+    global.fetch = vi.fn(
+      (input: RequestInfo | URL) =>
+        new Promise<Response>((resolve) => {
+          libraryResolvers.set(input.toString(), resolve);
+        }),
+    ) as typeof fetch;
+
+    const { result } = renderHook(() => useMovieFlow());
+    await waitFor(() => expect(result.current.userEmail).toBe("saku@example.com"));
+
+    await act(async () => result.current.signOut());
+    expect(result.current.userEmail).toBeNull();
+
+    await act(async () => {
+      libraryResolvers.get("/api/diaries")?.(
+        Response.json({
+          items: [
+            {
+              id: "private-diary",
+              content: "旧ユーザーだけの記録",
+              createdAt: "2026-09-12T00:00:00.000Z",
+            },
+          ],
+        }),
+      );
+      libraryResolvers.get("/api/photos")?.(Response.json({ items: [] }));
+      libraryResolvers.get("/api/obsessions")?.(Response.json({ items: [] }));
+      libraryResolvers.get("/api/movies")?.(Response.json({ items: [] }));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(result.current.diaries).toEqual([]);
+    expect(result.current.obsession).toBeNull();
+    expect(result.current.movie).toBeNull();
+  });
+
   it("日記と画像の投稿から偏愛分析、映画完成まで画面操作で実行する", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
