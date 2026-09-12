@@ -1,32 +1,16 @@
 import { execFile } from "node:child_process";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import ffmpegPath from "ffmpeg-static";
-
 import { VIDEO_PROCESS_TIMEOUT_MS } from "../timeouts";
+import { resolveFfmpegPath } from "./runtimeAssets";
 
 const execFileAsync = promisify(execFile);
 const SQUARE_OUTPUT_SIZE = 720;
 const OUTPUT_FPS = 24;
 const OUTPUT_TIMESCALE = 24_000;
-const SYSTEM_FFMPEG_PATHS = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"];
-
-async function resolveFfmpegPath(): Promise<string> {
-  const candidates = [process.env.FFMPEG_PATH, ffmpegPath, ...SYSTEM_FFMPEG_PATHS];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      // 次の候補を確認する。
-    }
-  }
-  throw new Error("FFmpeg binary is not available");
-}
 
 export async function prepareHologramVideo(
   video: Uint8Array,

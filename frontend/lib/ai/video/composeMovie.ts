@@ -1,29 +1,13 @@
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 
-import bundledFfmpegPath from "ffmpeg-static";
-
 import { VIDEO_CONCAT_TIMEOUT_MS } from "../timeouts";
+import { resolveFfmpegPath } from "./runtimeAssets";
 
 const execFileAsync = promisify(execFile);
-const SYSTEM_FFMPEG_PATHS = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"];
-
-async function resolveFfmpegPath() {
-  const candidates = [process.env.FFMPEG_PATH, bundledFfmpegPath, ...SYSTEM_FFMPEG_PATHS];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      // Try the next available binary source.
-    }
-  }
-  throw new Error("FFmpeg binary is not available");
-}
 
 export async function composeMovie(sceneVideos: Uint8Array[]) {
   if (sceneVideos.length === 0) throw new Error("結合する動画がありません");

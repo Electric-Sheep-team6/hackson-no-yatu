@@ -1,8 +1,10 @@
+import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 
 import { createClient } from "@supabase/supabase-js";
-import ffmpegStaticPath from "ffmpeg-static";
 import { NextResponse } from "next/server";
+
+import { VENDOR_FFMPEG_PATH, VENDOR_FONT_PATH } from "../../../lib/ai/video/runtimeAssets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,9 +14,14 @@ const AI_PROVIDER_GEMINI = "gemini";
 const DEFAULT_AI_TEXT_PROVIDER = AI_PROVIDER_OPENAI;
 const UNHEALTHY_STATUS = 503;
 
-const SYSTEM_FFMPEG_PATHS = ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"] as const;
+const SYSTEM_FFMPEG_PATHS = [
+  "/opt/homebrew/bin/ffmpeg",
+  "/usr/local/bin/ffmpeg",
+  "/usr/bin/ffmpeg",
+] as const;
 
 type AiTextProvider = typeof AI_PROVIDER_OPENAI | typeof AI_PROVIDER_GEMINI;
+type FfmpegSource = "vendor" | "env" | "system";
 
 type EnvironmentStatus = Readonly<{
   NEXT_PUBLIC_SUPABASE_URL: boolean;
@@ -45,24 +52,62 @@ const getEffectiveAiProvider = (): string =>
 const isValidAiProvider = (provider: string): provider is AiTextProvider =>
   provider === AI_PROVIDER_OPENAI || provider === AI_PROVIDER_GEMINI;
 
-const canAccess = async (path: string): Promise<boolean> => {
+const canAccess = async (path: string, mode: number = constants.F_OK): Promise<boolean> => {
   try {
-    await access(path);
+    await access(path, mode);
     return true;
   } catch {
     return false;
   }
 };
 
-const getFfmpegCandidates = (): readonly string[] =>
-  [process.env.FFMPEG_PATH, ffmpegStaticPath ?? undefined, ...SYSTEM_FFMPEG_PATHS]
-    .filter((candidate): candidate is string => isConfigured(candidate));
+// vendor/ffmpeg/ffmpeg はLinux x64のELFバイナリなので、そのプラットフォームのときだけ
+// 最優先候補にする。macOSではファイルが存在してもexecできないため候補から外す。
+const isVendorFfmpegCompatiblePlatform = (): boolean =>
+  process.platform === "linux" && process.arch === "x64";
 
-const resolveFfmpegPath = async (): Promise<string | null> => {
-  for (const candidate of getFfmpegCandidates()) {
-    if (await canAccess(candidate)) return candidate;
+const getFfmpegCandidates = (): ReadonlyArray<{ path: string; source: FfmpegSource }> => {
+  const candidates: Array<{ path: string; source: FfmpegSource }> = [];
+  if (isVendorFfmpegCompatiblePlatform()) {
+    candidates.push({ path: VENDOR_FFMPEG_PATH, source: "vendor" });
   }
-  return null;
+  if (isConfigured(process.env.FFMPEG_PATH)) {
+    candidates.push({ path: process.env.FFMPEG_PATH, source: "env" });
+  }
+  for (const systemPath of SYSTEM_FFMPEG_PATHS) {
+    candidates.push({ path: systemPath, source: "system" });
+  }
+  return candidates;
+};
+
+type FfmpegStatus = Readonly<{
+  available: boolean;
+  path: string | null;
+  source: FfmpegSource | null;
+}>;
+
+const resolveFfmpegStatus = async (): Promise<FfmpegStatus> => {
+  for (const candidate of getFfmpegCandidates()) {
+    if (await canAccess(candidate.path, constants.X_OK)) {
+      return { available: true, path: candidate.path, source: candidate.source };
+    }
+  }
+  return { available: false, path: null, source: null };
+};
+
+type FontStatus = Readonly<{
+  available: boolean;
+  path: string | null;
+  expectedPath: string;
+}>;
+
+const resolveFontStatus = async (): Promise<FontStatus> => {
+  const available = await canAccess(VENDOR_FONT_PATH, constants.R_OK);
+  return {
+    available,
+    path: available ? VENDOR_FONT_PATH : null,
+    expectedPath: VENDOR_FONT_PATH,
+  };
 };
 
 const canConnectToSupabase = async (): Promise<boolean> => {
@@ -100,23 +145,32 @@ const areRequiredEnvironmentVariablesConfigured = (
 export async function GET(): Promise<NextResponse> {
   const environment = getEnvironmentStatus();
   const aiTextProvider = getEffectiveAiProvider();
-  const [ffmpegPath, supabaseConnected] = await Promise.all([
-    resolveFfmpegPath(),
+  const [ffmpeg, font, supabaseConnected] = await Promise.all([
+    resolveFfmpegStatus(),
+    resolveFontStatus(),
     canConnectToSupabase(),
   ]);
 
   const aiTextProviderValid = isValidAiProvider(aiTextProvider);
   const ok = areRequiredEnvironmentVariablesConfigured(environment, aiTextProvider)
     && aiTextProviderValid
-    && ffmpegPath !== null
+    && ffmpeg.available
+    && font.available
     && supabaseConnected;
 
   return NextResponse.json({
     ok,
+    runtime: {
+      platform: process.platform,
+      arch: process.arch,
+      cwd: process.cwd(),
+      vercel: Boolean(process.env.VERCEL),
+    },
     // 環境変数は「設定されているか」だけを返し、値は絶対に返さない。
     environment,
     aiTextProvider: { configured: environment.AI_TEXT_PROVIDER, valid: aiTextProviderValid },
-    ffmpeg: { available: ffmpegPath !== null, path: ffmpegPath },
+    ffmpeg,
+    font,
     supabase: { connected: supabaseConnected },
   }, {
     status: ok ? 200 : UNHEALTHY_STATUS,
