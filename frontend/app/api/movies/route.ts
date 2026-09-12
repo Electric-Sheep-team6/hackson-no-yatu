@@ -213,6 +213,12 @@ export async function POST(request: Request) {
         "生成中の映画があります。完了後に再度お試しください",
       );
     }
+    if (
+      movieError?.code === "P0001" &&
+      movieError.message === "movie_generation_rate_limit"
+    ) {
+      throw new ApiError(429, "rate_limited", "映画生成は24時間に10回までです");
+    }
     if (movieError) throw movieError;
 
     after(() =>

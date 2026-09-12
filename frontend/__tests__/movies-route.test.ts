@@ -43,7 +43,10 @@ import { POST } from "@/app/api/movies/route";
 describe("POST /api/movies", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("実行中映画の一意制約違反を409へ変換する", async () => {
+  it.each([
+    ["23505", "duplicate key", 409, "conflict"],
+    ["P0001", "movie_generation_rate_limit", 429, "rate_limited"],
+  ])("DBエラー%sを適切なAPIエラーへ変換する", async (code, message, status, apiError) => {
     createClientMock.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
@@ -57,7 +60,7 @@ describe("POST /api/movies", () => {
       select: vi.fn(() => ({
         single: vi.fn().mockResolvedValue({
           data: null,
-          error: { code: "23505", message: "duplicate key" },
+          error: { code, message },
         }),
       })),
     }));
@@ -99,9 +102,9 @@ describe("POST /api/movies", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(status);
     await expect(response.json()).resolves.toMatchObject({
-      error: "conflict",
+      error: apiError,
     });
     expect(afterMock).not.toHaveBeenCalled();
     expect(recoverStale).toHaveBeenCalledWith(

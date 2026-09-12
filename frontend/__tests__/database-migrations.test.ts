@@ -264,4 +264,22 @@ describe("database migrations", () => {
     expect(migration).toContain("diaries.user_id = auth.uid()");
   });
 
+  it("映画生成を1ユーザー24時間10件まで原子的に制限する", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0018_limit_movie_generation.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain("returns trigger");
+    expect(migration).toContain("pg_advisory_xact_lock");
+    expect(migration).toContain("count(*) >= 10");
+    expect(migration).toContain("interval '24 hours'");
+    expect(migration).toContain("raise exception 'movie_generation_rate_limit'");
+    expect(migration).toContain("before insert on public.movies");
+    expect(migration).toContain("from public, anon, authenticated");
+  });
+
 });
