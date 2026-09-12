@@ -105,7 +105,10 @@ describe("日記・写真投稿API", () => {
       from: vi.fn(() => ({ insert })),
       storage: {
         from: vi.fn(() => ({
-          exists: vi.fn().mockResolvedValue({ data: true, error: null }),
+          info: vi.fn().mockResolvedValue({
+            data: { contentType: "image/jpeg", size: 3 },
+            error: null,
+          }),
         })),
       },
     });
@@ -128,8 +131,8 @@ describe("日記・写真投稿API", () => {
 
   it("Storageに存在しない写真をメタデータへ登録しない", async () => {
     const from = vi.fn();
-    const exists = vi.fn().mockResolvedValue({
-      data: false,
+    const info = vi.fn().mockResolvedValue({
+      data: null,
       error: { status: 404, message: "Object not found" },
     });
     createClientMock.mockResolvedValue({
@@ -140,7 +143,7 @@ describe("日記・写真投稿API", () => {
         }),
       },
       from,
-      storage: { from: vi.fn(() => ({ exists })) },
+      storage: { from: vi.fn(() => ({ info })) },
     });
 
     const response = await createPhoto(
@@ -151,7 +154,43 @@ describe("日記・写真投稿API", () => {
       }),
     );
 
-    expect(exists).toHaveBeenCalledWith("user-1/missing.jpg");
+    expect(info).toHaveBeenCalledWith("user-1/missing.jpg");
+    expect(response.status).toBe(400);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["text/html", 100, "非画像"],
+    ["image/jpeg", 0, "空ファイル"],
+    ["image/jpeg", 10 * 1024 * 1024 + 1, "10MB超"],
+  ])("%s・%sバイトの%sを登録しない", async (contentType, size) => {
+    const from = vi.fn();
+    createClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from,
+      storage: {
+        from: vi.fn(() => ({
+          info: vi.fn().mockResolvedValue({
+            data: { contentType, size },
+            error: null,
+          }),
+        })),
+      },
+    });
+
+    const response = await createPhoto(
+      new Request("http://localhost/api/photos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath: "user-1/invalid.jpg" }),
+      }),
+    );
+
     expect(response.status).toBe(400);
     expect(from).not.toHaveBeenCalled();
   });

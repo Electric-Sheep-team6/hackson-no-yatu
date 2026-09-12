@@ -426,4 +426,24 @@ describe("useMovieFlow", () => {
     expect(result.current.photoCount).toBe(0);
     expect(result.current.message?.text).toBe("写真を記録できませんでした");
   });
+
+  it("画像ではないファイルをStorageへ送信しない", async () => {
+    global.fetch = vi.fn(async () => Response.json({ items: [] })) as typeof fetch;
+    const { result } = renderHook(() => useMovieFlow());
+    await waitFor(() => expect(result.current.userEmail).not.toBeNull());
+    const textFile = new File(["not an image"], "note.txt", {
+      type: "text/plain",
+    });
+
+    await act(async () => {
+      await result.current.uploadPhotos({
+        target: { files: [textFile], value: "" },
+      } as unknown as React.ChangeEvent<HTMLInputElement>);
+    });
+
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(result.current.message?.text).toBe(
+      "画像ファイルだけをアップロードできます。",
+    );
+  });
 });

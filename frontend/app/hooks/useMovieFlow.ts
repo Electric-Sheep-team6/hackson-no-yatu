@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { createClient } from "@/lib/supabase/client";
-import { emailSchema } from "@/lib/validation";
+import { emailSchema, MAX_PHOTO_BYTES } from "@/lib/validation";
 
 type Diary = { id: string; content: string; createdAt: string };
 type PhotoPreview = { id: string; name: string; previewUrl: string };
@@ -322,6 +322,16 @@ export function useMovieFlow() {
           const file = files[index];
 
           setUploadProgress({ current: index + 1, total: files.length });
+
+          if (!file.type.startsWith("image/")) {
+            throw new Error("画像ファイルだけをアップロードできます。");
+          }
+          if (file.size === 0) {
+            throw new Error("空の画像ファイルはアップロードできません。");
+          }
+          if (file.size > MAX_PHOTO_BYTES) {
+            throw new Error("画像ファイルは10MB以下にしてください。");
+          }
 
           const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
           const storagePath = `${user.id}/${crypto.randomUUID()}.${extension}`;

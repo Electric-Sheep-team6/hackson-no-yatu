@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createClient } from "@/lib/supabase/server";
-import { createPhotoSchema } from "@/lib/validation";
+import { createPhotoSchema, MAX_PHOTO_BYTES } from "@/lib/validation";
 
 export async function POST(request: Request) {
   try {
@@ -33,10 +33,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: photoExists, error: storageError } = await supabase.storage
+    const { data: photoInfo, error: storageError } = await supabase.storage
       .from("photos")
-      .exists(storagePath);
-    if (!photoExists) {
+      .info(storagePath);
+    if (!photoInfo) {
+      if (storageError && storageError.status !== 404) throw storageError;
       throw new ApiError(
         400,
         "invalid_request",
@@ -44,6 +45,16 @@ export async function POST(request: Request) {
       );
     }
     if (storageError) throw storageError;
+    if (!photoInfo.contentType?.startsWith("image/")) {
+      throw new ApiError(400, "invalid_request", "画像ファイルではありません");
+    }
+    if (photoInfo.size === 0 || (photoInfo.size ?? 0) > MAX_PHOTO_BYTES) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "画像ファイルは1バイト以上10MB以下にしてください",
+      );
+    }
 
     if (diaryId) {
       const { data: diary, error: diaryError } = await supabase
