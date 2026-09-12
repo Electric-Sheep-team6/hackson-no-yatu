@@ -100,7 +100,7 @@ export function MovieApp({ userEmail }: { userEmail: string }) {
           </div>
           <div className="action-line">
             <p>日記 {flow.diaries.length}件　写真 {flow.photoCount}枚　動画 {flow.videoCount}本</p>
-            <button type="button" onClick={flow.analyze} disabled={disabled || flow.diaries.length + flow.photoCount + flow.videoCount === 0} className="button button-wide">{flow.busy === "analysis" ? "分析中..." : "わたしの偏愛を見つける"}</button>
+            <button type="button" onClick={flow.analyze} disabled={disabled || flow.diaries.length + flow.photoCount === 0} className="button button-wide">{flow.busy === "analysis" ? "分析中..." : "わたしの偏愛を見つける"}</button>
           </div>
           {flow.obsession && <article className="obsession-result"><p className="eyebrow">YOUR OBSESSION</p><h3>{flow.obsession.title}</h3><p>{flow.obsession.reason}</p></article>}
         </section>
@@ -112,7 +112,7 @@ export function MovieApp({ userEmail }: { userEmail: string }) {
           </div>
           <button type="button" onClick={flow.generate} disabled={disabled || !flow.obsession || flow.photoCount === 0} className="button premiere-button">{flow.busy === "movie" ? "映画を編集中..." : "人生の映画をつくる"}</button>
           <div className="screen-frame">
-            {flow.movie?.videoUrl ? <video controls preload="metadata" src={flow.movie.videoUrl}>生成した映画</video> : <div className="empty-screen"><span>MADE IN MEIDO</span><p>{flow.movie ? `生成状態: ${flow.movie.status}` : "あなたの映画は、ここで上映されます。"}</p></div>}
+            {flow.movie?.videoUrl ? <video controls preload="metadata" src={flow.movie.videoUrl}>生成した映画</video> : <div className="empty-screen"><span>MADE IN MEIDO</span><p>{flow.movie?.status === "failed" ? flow.movie.errorMessage ?? "映画生成に失敗しました。" : flow.movie ? `生成状態: ${flow.movie.status}` : "あなたの映画は、ここで上映されます。"}</p></div>}
           </div>
         </section>
 

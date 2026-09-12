@@ -97,6 +97,22 @@ function enforceHologramPrompts(movie: MovieScript): MovieScript {
   });
 }
 
+function keepAllowedReferencePhotos(
+  movie: MovieScript,
+  allowedPhotoUrls: string[],
+): MovieScript {
+  const allowed = new Set(allowedPhotoUrls);
+  return {
+    ...movie,
+    scenes: movie.scenes.map((scene) => ({
+      ...scene,
+      referencePhotoUrls: scene.referencePhotoUrls.filter((url) =>
+        allowed.has(url),
+      ),
+    })),
+  };
+}
+
 async function generateWithOpenAI(prompt: string, photoUrls: string[]): Promise<MovieScript> {
   const response = await createOpenAIClient().responses.parse({
     model: AI_TEXT_MODEL,
@@ -110,7 +126,10 @@ async function generateWithOpenAI(prompt: string, photoUrls: string[]): Promise<
     text: { format: zodTextFormat(movieScriptSchema, "movie_script") },
   });
   if (!response.output_parsed) throw new Error("映画構成の結果を読み取れませんでした");
-  return enforceHologramPrompts(movieScriptSchema.parse(response.output_parsed));
+  return keepAllowedReferencePhotos(
+    enforceHologramPrompts(movieScriptSchema.parse(response.output_parsed)),
+    photoUrls,
+  );
 }
 
 export async function generateMovieScript(input: GenerateMovieScriptInput): Promise<MovieScript> {
@@ -121,7 +140,7 @@ export async function generateMovieScript(input: GenerateMovieScriptInput): Prom
     const movie = await generateGeminiStructured(
       SCRIPT_INSTRUCTIONS, prompt, photoUrls, movieScriptJsonSchema, movieScriptSchema,
     );
-    return enforceHologramPrompts(movie);
+    return keepAllowedReferencePhotos(enforceHologramPrompts(movie), photoUrls);
   }
   return generateWithOpenAI(prompt, photoUrls);
 }

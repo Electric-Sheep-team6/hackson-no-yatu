@@ -124,13 +124,13 @@ export function useMovieFlow() {
   };
 
   const analyze = async () => {
-    if (diaries.length + photoCount + videoCount === 0) return setMessage("先に日記・写真・動画のいずれかを保存してください。");
+    if (diaries.length + photoCount === 0) return setMessage("偏愛分析のため、先に日記か写真を保存してください。動画は映画の編集素材として使われます。");
     setBusy("analysis"); setMessage(null);
     try {
       const response = await fetch("/api/obsessions", { method: "POST" });
       if (!response.ok) throw new Error(await responseError(response));
       const next = await response.json() as Obsession;
-      setObsession(next); setMessage(`${diaries.length}件の日記と${photoCount}枚の写真を分析し、${videoCount}本の動画を編集素材として準備しました。`);
+      setObsession(next); setMessage(`${diaries.length}件の日記と${photoCount}枚の写真を分析しました。${videoCount}本の動画は編集素材として使います。`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "分析に失敗しました。"); }
     finally { setBusy(null); }
   };

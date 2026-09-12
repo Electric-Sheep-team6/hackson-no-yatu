@@ -126,4 +126,36 @@ describe("AI generation", () => {
     expect(result.scenes).toHaveLength(3);
     expect(result.scenes.every((scene) => scene.videoPrompt.includes("subject away from the center"))).toBe(true);
   });
+
+  it("映画構成が返した未入力の参照 URL を除外する", async () => {
+    responsesParse.mockResolvedValue({
+      output_parsed: {
+        title: "雨のあと",
+        logline: "帰り道に見つけた静かな安心。",
+        synopsis: "雨上がりの街を歩く短編映画です。",
+        visualStyle: "soft blue cinematic light",
+        bgm: "quiet piano",
+        scenes: Array.from({ length: 3 }, (_, index) => ({
+          order: index + 1,
+          source: "駅前",
+          duration: 5,
+          narration: "水たまりが光る。",
+          videoPrompt: "A single continuous cinematic shot, no scene transitions.",
+          referencePhotoUrls: index === 0 ? [
+            "https://example.com/allowed.jpg",
+            "https://untrusted.example.com/photo.jpg",
+          ] : [],
+        })),
+      },
+    });
+
+    const result = await generateMovieScript({
+      obsession: analysis,
+      photoUrls: ["https://example.com/allowed.jpg"],
+    });
+
+    expect(result.scenes[0].referencePhotoUrls).toEqual([
+      "https://example.com/allowed.jpg",
+    ]);
+  });
 });

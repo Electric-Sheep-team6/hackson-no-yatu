@@ -151,3 +151,4 @@ describe("GeminiVideoGenerator", () => {
     })).rejects.toThrow("Gemini から動画データが返されませんでした");
   });
 });
+
