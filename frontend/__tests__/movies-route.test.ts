@@ -147,14 +147,19 @@ describe("POST /api/movies", () => {
     }));
     const createSignedUrl = vi
       .fn()
-      .mockImplementation(async (path: string) => ({
-        data: { signedUrl: `https://storage.example.com/${path}` },
-        error: null,
-      }));
+      .mockImplementation(async (path: string) =>
+        path.endsWith("missing.jpg")
+          ? { data: null, error: new Error("object not found") }
+          : {
+              data: { signedUrl: `https://storage.example.com/${path}` },
+              error: null,
+            },
+      );
     const upload = vi.fn().mockResolvedValue({ error: null });
     const photoLimit = vi.fn().mockResolvedValue({
       data: [
         { storage_path: "user-1/photo-1.jpg" },
+        { storage_path: "user-1/missing.jpg" },
         { storage_path: "user-1/photo-2.jpg" },
       ],
       error: null,

@@ -44,10 +44,9 @@ async function processMovieGeneration(
         admin.storage.from("photos").createSignedUrl(storage_path, 3600),
       ),
     );
-    const photoUrls = signedUrlResults.map(({ data, error }) => {
-      if (error || !data) throw error ?? new Error("Failed to sign photo URL");
-      return data.signedUrl;
-    });
+    const photoUrls = signedUrlResults.flatMap(({ data, error }) =>
+      error || !data ? [] : [data.signedUrl],
+    );
 
     result = await admin
       .from("movies")

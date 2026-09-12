@@ -31,13 +31,20 @@ describe("POST /api/obsessions", () => {
       error: null,
     });
     const photoLimit = vi.fn().mockResolvedValue({
-      data: [{ storage_path: "user-1/night.jpg" }],
+      data: [
+        { storage_path: "user-1/night.jpg" },
+        { storage_path: "user-1/missing.jpg" },
+      ],
       error: null,
     });
-    const createSignedUrl = vi.fn().mockResolvedValue({
-      data: { signedUrl: "https://storage.example.com/signed-night.jpg" },
-      error: null,
-    });
+    const createSignedUrl = vi.fn().mockImplementation(async (path: string) =>
+      path.endsWith("missing.jpg")
+        ? { data: null, error: new Error("object not found") }
+        : {
+            data: { signedUrl: "https://storage.example.com/signed-night.jpg" },
+            error: null,
+          },
+    );
     const userFrom = vi.fn((table: string) => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
@@ -95,6 +102,7 @@ describe("POST /api/obsessions", () => {
     expect(diaryLimit).toHaveBeenCalledWith(50);
     expect(photoLimit).toHaveBeenCalledWith(12);
     expect(createSignedUrl).toHaveBeenCalledWith("user-1/night.jpg", 3600);
+    expect(createSignedUrl).toHaveBeenCalledWith("user-1/missing.jpg", 3600);
     expect(analyzeObsessionMock).toHaveBeenCalledWith({
       diaryTexts: ["古い日記", "新しい日記"],
       photoUrls: ["https://storage.example.com/signed-night.jpg"],
@@ -154,6 +162,47 @@ describe("POST /api/obsessions", () => {
           })),
         })),
       })),
+    });
+    const rpc = vi.fn();
+    createAdminClientMock.mockReturnValue({ rpc });
+
+    const response = await POST();
+
+    expect(response.status).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(analyzeObsessionMock).not.toHaveBeenCalled();
+  });
+
+  it("写真が全て読めない場合は分析回数枠を消費しない", async () => {
+    const diaryLimit = vi.fn().mockResolvedValue({ data: [], error: null });
+    const photoLimit = vi.fn().mockResolvedValue({
+      data: [{ storage_path: "user-1/missing.jpg" }],
+      error: null,
+    });
+    createClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from: vi.fn((table: string) => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            order: vi.fn(() => ({
+              limit: table === "diaries" ? diaryLimit : photoLimit,
+            })),
+          })),
+        })),
+      })),
+      storage: {
+        from: vi.fn(() => ({
+          createSignedUrl: vi.fn().mockResolvedValue({
+            data: null,
+            error: new Error("object not found"),
+          }),
+        })),
+      },
     });
     const rpc = vi.fn();
     createAdminClientMock.mockReturnValue({ rpc });
