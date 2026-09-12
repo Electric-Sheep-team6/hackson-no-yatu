@@ -6,9 +6,12 @@ import { promisify } from "node:util";
 
 import ffmpegPath from "ffmpeg-static";
 
+import { VIDEO_PROCESS_TIMEOUT_MS } from "../timeouts";
+
 const execFileAsync = promisify(execFile);
 const SQUARE_OUTPUT_SIZE = 720;
-const VIDEO_PROCESS_TIMEOUT_MS = 120_000;
+const OUTPUT_FPS = 24;
+const OUTPUT_TIMESCALE = 24_000;
 const SYSTEM_FFMPEG_PATHS = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"];
 
 async function resolveFfmpegPath(): Promise<string> {
@@ -36,7 +39,11 @@ export async function prepareHologramVideo(
     await execFileAsync(await resolveFfmpegPath(), [
       "-y", "-i", inputPath,
       "-vf", `crop='min(iw,ih)':'min(iw,ih)',scale=${SQUARE_OUTPUT_SIZE}:${SQUARE_OUTPUT_SIZE},setsar=1`,
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+      // ホログラムファンにスピーカーは無いため音声は不要。
+      // 併せて、連結時に -c copy が安全に成立するよう映像パラメータを固定する。
+      "-an",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+      "-r", String(OUTPUT_FPS), "-video_track_timescale", String(OUTPUT_TIMESCALE),
       "-movflags", "+faststart", outputPath,
     ], { timeout: VIDEO_PROCESS_TIMEOUT_MS });
     return new Uint8Array(await readFile(outputPath));

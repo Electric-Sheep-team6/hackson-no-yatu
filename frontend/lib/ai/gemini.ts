@@ -2,10 +2,11 @@ import { z } from "zod";
 
 import { loadReferenceImage } from "./referenceImage";
 
+import { TEXT_GENERATION_TIMEOUT_MS } from "./timeouts";
+
 export const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_TEXT_TIMEOUT_MS = 60_000;
 const MAX_TEXT_IMAGES = 12;
 const GEMINI_THINKING_LEVEL = "MINIMAL";
 
@@ -49,7 +50,7 @@ async function requestStructuredText(
         thinkingConfig: { thinkingLevel: GEMINI_THINKING_LEVEL },
       },
     }),
-    signal: AbortSignal.timeout(GEMINI_TEXT_TIMEOUT_MS),
+    signal: AbortSignal.timeout(TEXT_GENERATION_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error("Gemini テキスト生成に失敗しました");
   const parsed = geminiResponseSchema.safeParse(await response.json());

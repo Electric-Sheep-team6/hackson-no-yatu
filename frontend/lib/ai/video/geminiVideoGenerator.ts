@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 import { loadReferenceImage, type ReferenceImage } from "../referenceImage";
+import { VIDEO_REQUEST_TIMEOUT_MS } from "../timeouts";
 import { prepareHologramVideo } from "./prepareHologramVideo";
 import type { GenerateSceneInput, GenerateSceneResult, VideoGenerator } from "./VideoGenerator";
 
 const GEMINI_MODEL = "gemini-omni-1.1-flash";
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 const MAX_REFERENCE_IMAGES = 3;
-const REQUEST_TIMEOUT_MS = 75_000;
 
 const videoContentSchema = z.object({
   type: z.literal("video").optional(),
@@ -75,7 +75,7 @@ export class GeminiVideoGenerator implements VideoGenerator {
         },
         response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p" },
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(VIDEO_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error("Gemini 動画生成に失敗しました");
     const parsed = interactionSchema.safeParse(await response.json());

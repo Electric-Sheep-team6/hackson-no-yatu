@@ -6,6 +6,8 @@ import { execFile } from "node:child_process";
 
 import bundledFfmpegPath from "ffmpeg-static";
 
+import { VIDEO_CONCAT_TIMEOUT_MS } from "../timeouts";
+
 const execFileAsync = promisify(execFile);
 const SYSTEM_FFMPEG_PATHS = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"];
 
@@ -39,7 +41,7 @@ export async function composeMovie(sceneVideos: Uint8Array[]) {
     await execFileAsync(await resolveFfmpegPath(), [
       "-y", "-f", "concat", "-safe", "0", "-i", listPath,
       "-c", "copy", "-movflags", "+faststart", outputPath,
-    ], { timeout: 120_000, maxBuffer: 1_024 * 1_024 });
+    ], { timeout: VIDEO_CONCAT_TIMEOUT_MS, maxBuffer: 1_024 * 1_024 });
     return new Uint8Array(await readFile(outputPath));
   } finally {
     await rm(directory, { recursive: true, force: true });
