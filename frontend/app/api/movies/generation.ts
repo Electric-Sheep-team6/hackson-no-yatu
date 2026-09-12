@@ -8,6 +8,7 @@ import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
 import type { GenerateSceneResult } from "@/lib/ai/video/VideoGenerator";
 import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { beginMovieImageCache } from "@/lib/ai/referenceImage";
+import { VIDEO_CONCAT_TIMEOUT_MS } from "@/lib/ai/timeouts";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const SCENE_CONCURRENCY = 3;
@@ -290,7 +291,7 @@ async function createScript(
   }
 }
 
-async function composeScenes(outcomes: SceneOutcome[], movieId: string) {
+async function composeScenes(outcomes: SceneOutcome[], movieId: string, movie: MovieScript) {
   const failed = outcomes.find(({ metadata }) => metadata.status === "failed");
   if (failed) {
     const action = failed.metadata.failureStage === "upload" ? "アップロード" : "生成";
@@ -301,7 +302,16 @@ async function composeScenes(outcomes: SceneOutcome[], movieId: string) {
   }
   const startedAt = Date.now();
   try {
-    return await composeMovie(outcomes.map(({ videoData }) => videoData!));
+    const sceneVideos = outcomes.map(({ videoData }) => videoData!);
+    return await composeMovie(
+      sceneVideos,
+      {
+        title: movie.title,
+        logline: movie.logline,
+        scenes: movie.scenes.map((scene) => ({ narration: scene.narration })),
+      },
+      VIDEO_CONCAT_TIMEOUT_MS,
+    );
   } catch (error) {
     throw new GenerationStageError("動画の連結", classifyError(error));
   } finally {
@@ -373,7 +383,7 @@ export async function processMovieGeneration(
     await updateMovie(admin, movieId, userId, {
       movie_json: { ...movie, generatedScenes },
     });
-    const finalVideo = await composeScenes(outcomes, movieId);
+    const finalVideo = await composeScenes(outcomes, movieId, movie);
     const finalPath = await uploadMovie(admin, movieId, userId, finalVideo);
     await updateMovie(admin, movieId, userId, {
       status: "completed", movie_json: { ...movie, generatedScenes },

@@ -6,33 +6,60 @@ import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { composeMovie } from "@/lib/ai/video/composeMovie";
+import { composeMovie, OUTPUT_DURATION } from "@/lib/ai/video/composeMovie";
 import { prepareHologramVideo } from "@/lib/ai/video/prepareHologramVideo";
+import { VIDEO_CONCAT_TIMEOUT_MS } from "@/lib/ai/timeouts";
 
 const execFileAsync = promisify(execFile);
 const systemFfmpegPath = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"].find(existsSync);
 const systemFfprobePath = ["/opt/homebrew/bin/ffprobe", "/usr/bin/ffprobe"].find(existsSync);
 const canUseSystemFfmpeg = Boolean(systemFfmpegPath);
 
-describe.skipIf(!canUseSystemFfmpeg)("composeMovie", () => {
-  it("concatenates scene MP4s into a playable MP4", async () => {
+describe.skipIf(!canUseSystemFfmpeg || !systemFfprobePath)("composeMovie", () => {
+  it("3シーンから約18.2秒の予告編MP4を生成する", async () => {
     const directory = await mkdtemp(join(tmpdir(), "last-screen-test-"));
     try {
-      const first = join(directory, "first.mp4");
-      const second = join(directory, "second.mp4");
-      if (!systemFfmpegPath) throw new Error("FFmpeg is unavailable");
-      for (const [path, color] of [[first, "red"], [second, "blue"]] as const) {
-        await execFileAsync(systemFfmpegPath, ["-y", "-f", "lavfi", "-i", `color=c=${color}:s=32x32:d=0.1`, "-pix_fmt", "yuv420p", path]);
+      if (!systemFfmpegPath || !systemFfprobePath) throw new Error("FFmpeg is unavailable");
+      const scenePaths = ["scene-1.mp4", "scene-2.mp4", "scene-3.mp4"].map((name) =>
+        join(directory, name),
+      );
+      for (const path of scenePaths) {
+        await execFileAsync(systemFfmpegPath, [
+          "-y", "-f", "lavfi", "-i", "color=c=red:s=720x720:r=24:d=5",
+          "-pix_fmt", "yuv420p", path,
+        ]);
       }
 
-      const movie = await composeMovie([new Uint8Array(await readFile(first)), new Uint8Array(await readFile(second))]);
+      const sceneVideos = await Promise.all(
+        scenePaths.map(async (path) => new Uint8Array(await readFile(path))),
+      );
+      const movie = await composeMovie(
+        sceneVideos,
+        {
+          title: "テストタイトル",
+          logline: "テスト用のロゴラインです",
+          scenes: [
+            { narration: "シーン1のナレーション" },
+            { narration: "シーン2のナレーション" },
+            { narration: "シーン3のナレーション" },
+          ],
+        },
+        VIDEO_CONCAT_TIMEOUT_MS,
+      );
 
       expect(movie.byteLength).toBeGreaterThan(100);
       expect(Buffer.from(movie.subarray(4, 8)).toString()).toBe("ftyp");
+
+      const outputPath = join(directory, "output.mp4");
+      await writeFile(outputPath, movie);
+      const { stdout } = await execFileAsync(systemFfprobePath, [
+        "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", outputPath,
+      ]);
+      expect(Number(stdout.trim())).toBeCloseTo(OUTPUT_DURATION, 0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 describe.skipIf(!systemFfmpegPath || !systemFfprobePath)("prepareHologramVideo", () => {
