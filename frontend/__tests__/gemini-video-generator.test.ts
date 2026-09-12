@@ -90,6 +90,54 @@ describe("GeminiVideoGenerator", () => {
     ).rejects.toThrow("参照ファイルが画像ではありません");
   });
 
+  it("一部の参照画像が読めなくても利用可能な画像で生成を続ける", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const mp4 = new Uint8Array([
+      0, 0, 0, 12,
+      0x66, 0x74, 0x79, 0x70,
+      0x69, 0x73, 0x6f, 0x6d,
+    ]);
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: { "content-type": "image/jpeg" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("missing", {
+          status: 404,
+          headers: { "content-type": "text/plain" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "interaction-1",
+          steps: [{
+            content: [{
+              type: "video",
+              data: Buffer.from(mp4).toString("base64"),
+            }],
+          }],
+        }), { status: 200 }),
+      ) as typeof fetch;
+
+    await expect(
+      new GeminiVideoGenerator().generateScene({
+        prompt: "scene",
+        duration: 5,
+        referenceImageUrls: [
+          "https://storage.example.com/available.jpg",
+          "https://storage.example.com/missing.jpg",
+        ],
+      }),
+    ).resolves.toMatchObject({ providerJobId: "interaction-1" });
+
+    const [, , geminiRequest] = vi.mocked(global.fetch).mock.calls;
+    const body = JSON.parse((geminiRequest[1] as RequestInit).body as string);
+    expect(body.input.filter((item: { type: string }) => item.type === "image"))
+      .toHaveLength(1);
+  });
+
   it("10MBを超える参照画像をダウンロード前に拒否する", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     global.fetch = vi.fn().mockResolvedValue(

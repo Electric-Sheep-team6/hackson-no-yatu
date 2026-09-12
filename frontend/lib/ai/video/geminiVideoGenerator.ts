@@ -67,7 +67,19 @@ export class GeminiVideoGenerator implements VideoGenerator {
   async generateScene(input: GenerateSceneInput): Promise<GenerateSceneResult> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-    const images = await Promise.all(input.referenceImageUrls.slice(0, 3).map(toImageInput));
+    const requestedImageUrls = input.referenceImageUrls.slice(0, 3);
+    const imageResults = await Promise.allSettled(
+      requestedImageUrls.map(toImageInput),
+    );
+    const images = imageResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (requestedImageUrls.length > 0 && images.length === 0) {
+      const failedImage = imageResults.find(
+        (result) => result.status === "rejected",
+      );
+      if (failedImage?.status === "rejected") throw failedImage.reason;
+    }
     const durationPrompt = `${input.prompt}\nThe generated video must be exactly ${input.duration} seconds long.`;
     const response = await fetch(INTERACTIONS_URL, {
       method: "POST",
