@@ -116,6 +116,7 @@ export default function Home() {
             <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
               人生の最後に観る映画を、人生をかけて作る。
             </h1>
+            <p className="mt-3 text-lg text-cyan-100">日記と写真を、何度でも貯める</p>
           </div>
           <button className="rounded-full border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 transition hover:border-cyan-300 hover:bg-cyan-500/20">
             予告編を視聴
