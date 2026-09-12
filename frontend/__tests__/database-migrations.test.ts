@@ -191,4 +191,24 @@ describe("database migrations", () => {
     expect(migration).toContain("where id = 'photos'");
   });
 
+  it("登録済み写真のStorageオブジェクトを直接削除できない", () => {
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../supabase/migrations/0014_only_delete_orphaned_photos.sql",
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain('drop policy "own folder delete photos"');
+    expect(migration).toContain('create policy "own folder delete orphaned photos"');
+    expect(migration).toContain("on storage.objects for delete");
+    expect(migration).toContain("and not exists");
+    expect(migration).toContain("from public.photos");
+    expect(migration).toContain("photos.user_id = auth.uid()");
+    expect(migration).toContain(
+      "photos.storage_path = storage.objects.name",
+    );
+  });
+
 });
