@@ -35,7 +35,8 @@ async function processMovieGeneration(
       .from("photos")
       .select("storage_path")
       .eq("user_id", userId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(12);
     if (photosResult.error) throw photosResult.error;
 
     const signedUrlResults = await Promise.all(

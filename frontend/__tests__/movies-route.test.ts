@@ -152,6 +152,14 @@ describe("POST /api/movies", () => {
         error: null,
       }));
     const upload = vi.fn().mockResolvedValue({ error: null });
+    const photoLimit = vi.fn().mockResolvedValue({
+      data: [
+        { storage_path: "user-1/photo-1.jpg" },
+        { storage_path: "user-1/photo-2.jpg" },
+      ],
+      error: null,
+    });
+    const photoOrder = vi.fn(() => ({ limit: photoLimit }));
     const admin = {
       rpc: vi.fn().mockResolvedValue({ data: 0, error: null }),
       from: vi.fn((table: string) => {
@@ -175,13 +183,7 @@ describe("POST /api/movies", () => {
           return {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
-                order: vi.fn().mockResolvedValue({
-                  data: [
-                    { storage_path: "user-1/photo-1.jpg" },
-                    { storage_path: "user-1/photo-2.jpg" },
-                  ],
-                  error: null,
-                }),
+                order: photoOrder,
               })),
             })),
           };
@@ -248,6 +250,10 @@ describe("POST /api/movies", () => {
       obsession: { title: "夜道への偏愛" },
       photoUrls,
     });
+    expect(photoOrder).toHaveBeenCalledWith("created_at", {
+      ascending: false,
+    });
+    expect(photoLimit).toHaveBeenCalledWith(12);
     expect(generateSceneMock).toHaveBeenCalledTimes(3);
     expect(generateSceneMock).toHaveBeenNthCalledWith(1, {
       prompt: "prompt-1",
