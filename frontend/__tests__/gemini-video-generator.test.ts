@@ -73,11 +73,13 @@ describe("GeminiVideoGenerator", () => {
     ).rejects.toThrow("Gemini から有効なMP4動画が返されませんでした");
   });
 
-  it("画像ではない参照ファイルを拒否する", async () => {
+  it.each(["text/html", "image/gif", "image/svg+xml"])(
+    "AI非対応の参照形式%sを拒否する",
+    async (contentType) => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     global.fetch = vi.fn().mockResolvedValue(
       new Response("not an image", {
-        headers: { "content-type": "text/html" },
+        headers: { "content-type": contentType },
       }),
     ) as typeof fetch;
 
@@ -87,8 +89,9 @@ describe("GeminiVideoGenerator", () => {
         duration: 5,
         referenceImageUrls: ["https://storage.example.com/not-image"],
       }),
-    ).rejects.toThrow("参照ファイルが画像ではありません");
-  });
+    ).rejects.toThrow("参照画像はJPEG、PNG、WebP形式にしてください");
+    },
+  );
 
   it("一部の参照画像が読めなくても利用可能な画像で生成を続ける", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-key");

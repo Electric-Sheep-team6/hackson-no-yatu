@@ -1,4 +1,5 @@
 import type { GenerateSceneInput, GenerateSceneResult, VideoGenerator } from "./VideoGenerator";
+import { isAllowedPhotoMimeType } from "../../validation";
 
 const GEMINI_MODEL = "gemini-omni-1.1-flash";
 const INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
@@ -52,8 +53,8 @@ async function toImageInput(url: string) {
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error("参照画像を取得できませんでした");
   const contentType = response.headers.get("content-type")?.split(";")[0] ?? "";
-  if (!contentType.startsWith("image/")) {
-    throw new Error("参照ファイルが画像ではありません");
+  if (!isAllowedPhotoMimeType(contentType)) {
+    throw new Error("参照画像はJPEG、PNG、WebP形式にしてください");
   }
   const image = await readReferenceImage(response);
   return {
