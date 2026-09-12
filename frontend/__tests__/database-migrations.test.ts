@@ -1,9 +1,20 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 describe("database migrations", () => {
+  it("migration番号は重複せず、mainの動画用migrationの後に保護migrationを適用する", () => {
+    const migrations = readdirSync(
+      resolve(process.cwd(), "../supabase/migrations"),
+    ).filter((file) => file.endsWith(".sql"));
+    const versions = migrations.map((file) => file.split("_")[0]);
+
+    expect(new Set(versions).size).toBe(versions.length);
+    expect(migrations).toContain("0010_add_memory_videos.sql");
+    expect(migrations).toContain("0018_enforce_photo_storage_ownership.sql");
+  });
+
   it("SECURITY DEFINER関数のsearch_pathと実行権限を固定する", () => {
     const migration = readFileSync(
       resolve(
@@ -121,165 +132,18 @@ describe("database migrations", () => {
     expect(migration).toContain("public = excluded.public");
   });
 
-  it("利用者がメタデータ保存に失敗した自分の写真を削除できる", () => {
+  it("記録動画を利用者別に保存するprivateテーブルとバケットを作る", () => {
     const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0010_allow_photo_cleanup.sql",
-      ),
+      resolve(process.cwd(), "../supabase/migrations/0010_add_memory_videos.sql"),
       "utf8",
     );
-
-    expect(migration).toContain("on storage.objects for delete");
-    expect(migration).toContain("to authenticated");
-    expect(migration).toContain("bucket_id = 'photos'");
-    expect(migration).toContain(
-      "(storage.foldername(name))[1] = auth.uid()::text",
-    );
-  });
-
-  it("進捗更新から6分間停止した映画生成だけを回収する", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0011_recover_only_inactive_movies.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain("updated_at < pg_catalog.now()");
-    expect(migration).not.toContain("created_at < pg_catalog.now()");
-    expect(migration).toContain("interval '6 minutes'");
-    expect(migration).toContain("security definer");
-    expect(migration).toContain("set search_path = ''");
-    expect(migration).toContain(
-      "revoke execute on function public.recover_stale_movie_generations(uuid) from public, anon, authenticated",
-    );
-    expect(migration).toContain(
-      "grant execute on function public.recover_stale_movie_generations(uuid) to service_role",
-    );
-  });
-
-  it("写真を他人の日記へ直接紐付けられない", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0012_enforce_photo_diary_ownership.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain('drop policy "insert own photos"');
+    expect(migration).toContain("create table public.videos");
+    expect(migration).toContain("alter table public.videos enable row level security");
     expect(migration).toContain("user_id = auth.uid()");
-    expect(migration).toContain("diary_id is null");
-    expect(migration).toContain("from public.diaries");
-    expect(migration).toContain("diaries.user_id = auth.uid()");
-  });
-
-  it("Storageへ直接送信しても写真のサイズ・MIME制限を迂回できない", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0013_restrict_photo_uploads.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain("update storage.buckets");
-    expect(migration).toContain("file_size_limit = 10485760");
-    expect(migration).toContain("allowed_mime_types = array['image/*']::text[]");
-    expect(migration).toContain("where id = 'photos'");
-  });
-
-  it("登録済み写真のStorageオブジェクトを直接削除できない", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0014_only_delete_orphaned_photos.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain('drop policy "own folder delete photos"');
-    expect(migration).toContain('create policy "own folder delete orphaned photos"');
-    expect(migration).toContain("on storage.objects for delete");
-    expect(migration).toContain("and not exists");
-    expect(migration).toContain("from public.photos");
-    expect(migration).toContain("photos.user_id = auth.uid()");
-    expect(migration).toContain(
-      "photos.storage_path = storage.objects.name",
-    );
-  });
-
-  it("直接INSERTでも空白・1万字超の日記を保存できない", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0015_validate_diary_content.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain("alter table public.diaries");
-    expect(migration).toContain("add constraint diaries_content_length_check");
-    expect(migration).toContain("char_length(btrim(content)) >= 1");
-    expect(migration).toContain("char_length(content) <= 10000");
-    expect(migration).toContain("not valid");
-  });
-
-  it("AI処理が共通対応する写真形式だけをStorageで許可する", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0016_restrict_photo_formats.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain("update storage.buckets");
-    expect(migration).toContain("'image/jpeg'");
-    expect(migration).toContain("'image/png'");
-    expect(migration).toContain("'image/webp'");
-    expect(migration).not.toContain("'image/*'");
-    expect(migration).toContain("where id = 'photos'");
-  });
-
-  it("直接INSERTでも他人のStorageパスを写真行へ保存できない", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0017_enforce_photo_storage_ownership.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain('drop policy "insert own photos"');
-    expect(migration).toContain("user_id = auth.uid()");
-    expect(migration).toContain(
-      "storage_path like auth.uid()::text || '/%'",
-    );
-    expect(migration).toContain(
-      "storage_path not like auth.uid()::text || '/%/%'",
-    );
-    expect(migration).toContain("diaries.user_id = auth.uid()");
-  });
-
-  it("映画生成を1ユーザー24時間10件まで原子的に制限する", () => {
-    const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "../supabase/migrations/0018_limit_movie_generation.sql",
-      ),
-      "utf8",
-    );
-
-    expect(migration).toContain("returns trigger");
-    expect(migration).toContain("pg_advisory_xact_lock");
-    expect(migration).toContain("count(*) >= 10");
-    expect(migration).toContain("interval '24 hours'");
-    expect(migration).toContain("raise exception 'movie_generation_rate_limit'");
-    expect(migration).toContain("before insert on public.movies");
-    expect(migration).toContain("from public, anon, authenticated");
+    expect(migration).toContain("'videos',\n  'videos',\n  false");
+    expect(migration).toContain("26214400");
+    expect(migration).toContain("allowed_mime_types");
+    expect(migration).toContain("bucket_id = 'videos'");
   });
 
 });

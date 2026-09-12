@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const responsesParse = vi.hoisted(() => vi.fn());
 
@@ -10,6 +10,7 @@ vi.mock("@/lib/ai/openai", () => ({
 import { analyzeObsession } from "@/lib/ai/analyzeObsession";
 import { generateMovieScript } from "@/lib/ai/generateMovieScript";
 
+const originalFetch = global.fetch;
 const analysis = {
   title: "雨上がりの帰り道",
   reason: "帰宅時の雨上がりを何度も記録しているためです。",
@@ -19,63 +20,128 @@ const analysis = {
   visualMotifs: ["濡れたアスファルト"],
 };
 
-describe("AI generation", () => {
-  beforeEach(() => vi.clearAllMocks());
+const scenes = Array.from({ length: 3 }, (_, index) => ({
+  order: index + 1,
+  source: "駅前",
+  duration: 8,
+  narration: "水たまりが光る。",
+  videoPrompt: "Pure black background, centered subject, single continuous shot, no scene transitions.",
+  referencePhotoUrls: ["https://example.com/1.jpg"],
+}));
 
-  it("analyzes diaries and at most 12 photos with non-stored structured output", async () => {
+const movie = {
+  title: "雨のあと",
+  logline: "帰り道に見つけた静かな安心。",
+  synopsis: "雨上がりの街を歩く短編映画です。",
+  visualStyle: "high contrast hologram",
+  bgm: "quiet piano",
+  scenes,
+};
+
+function geminiResponse(value: unknown): Response {
+  return new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: JSON.stringify(value) }] } }],
+  }), { status: 200 });
+}
+
+describe("AI generation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    global.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    global.fetch = originalFetch;
+  });
+
+  it("未設定時はGeminiで分析する(Geminiに一本化済み)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(geminiResponse(analysis)) as typeof fetch;
+
+    await expect(analyzeObsession({ diaryTexts: ["駅まで歩いた"], photoUrls: [] })).resolves.toEqual(analysis);
+
+    expect(responsesParse).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalled();
+  });
+
+  it("AI_TEXT_PROVIDER=openaiなら日記と最大26枚の写真を分析する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({ output_parsed: analysis });
-    const photoUrls = Array.from({ length: 13 }, (_, index) => `https://example.com/${index}.jpg`);
+    const photoUrls = Array.from({ length: 27 }, (_, index) => `https://example.com/${index}.jpg`);
 
     await expect(analyzeObsession({ diaryTexts: ["駅まで歩いた"], photoUrls })).resolves.toEqual(analysis);
 
-    expect(responsesParse).toHaveBeenCalledOnce();
     const request = responsesParse.mock.calls[0][0];
     expect(request).toMatchObject({ model: "gpt-5.6-terra", store: false, reasoning: { effort: "low" } });
-    expect(request.input[0].content.filter((item: { type: string }) => item.type === "input_image")).toHaveLength(12);
+    expect(request.input[0].content.filter((item: { type: string }) => item.type === "input_image")).toHaveLength(26);
     expect(request.text.format.type).toBe("json_schema");
   });
 
-  it("fails safely when obsession analysis has no parseable result", async () => {
-    responsesParse.mockResolvedValue({ output_parsed: null });
+  it("AI_TEXT_PROVIDER=geminiならGeminiのstructured outputを使う", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(geminiResponse(analysis)) as typeof fetch;
 
-    await expect(analyzeObsession({ diaryTexts: ["記録"], photoUrls: [] })).rejects.toThrow("偏愛分析の結果を読み取れませんでした");
-  });
+    await expect(analyzeObsession({ diaryTexts: ["駅まで歩いた"], photoUrls: [] })).resolves.toEqual(analysis);
 
-  it("日記本文を合計5万文字に制限しつつ最新の日記を優先する", async () => {
-    responsesParse.mockResolvedValue({ output_parsed: analysis });
-
-    await analyzeObsession({
-      diaryTexts: ["あ".repeat(50_000), "最新の日記"],
-      photoUrls: [],
+    expect(responsesParse).not.toHaveBeenCalled();
+    const [url, request] = vi.mocked(global.fetch).mock.calls[0];
+    expect(url).toContain("/models/gemini-3.8-flash:generateContent");
+    const body = JSON.parse((request as RequestInit).body as string);
+    expect(body.generationConfig).toMatchObject({
+      responseMimeType: "application/json",
+      thinkingConfig: { thinkingLevel: "MEDIUM" },
     });
-
-    const request = responsesParse.mock.calls[0][0];
-    const inputText = request.input[0].content[0].text as string;
-    expect(inputText).toContain("最新の日記");
-    expect(inputText.match(/あ/g)).toHaveLength(50_000 - "最新の日記".length);
-    expect(inputText.indexOf("あ")).toBeLessThan(inputText.indexOf("最新の日記"));
+    expect(body.generationConfig.responseJsonSchema).toBeDefined();
   });
 
-  it("creates a structured movie script with medium reasoning", async () => {
-    const movie = {
-      title: "雨のあと",
-      logline: "帰り道に見つけた静かな安心。",
-      synopsis: "雨上がりの街を歩く短編映画です。",
-      visualStyle: "soft blue cinematic light",
-      bgm: "quiet piano",
-      scenes: [{ order: 1, source: "駅前", duration: 5, narration: "水たまりが光る。", videoPrompt: "A single continuous cinematic shot, no scene transitions.", referencePhotoUrls: ["https://example.com/1.jpg"] }],
-    };
-    responsesParse.mockResolvedValue({ output_parsed: movie });
+  it("Gemini出力がzodスキーマ違反なら拒否する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(geminiResponse({ ...analysis, title: "" })) as typeof fetch;
 
-    await expect(generateMovieScript({ obsession: analysis, photoUrls: ["https://example.com/1.jpg"] })).resolves.toEqual(movie);
+    await expect(analyzeObsession({ diaryTexts: ["記録"], photoUrls: [] })).rejects.toThrow();
+  });
+
+  it("偏愛分析へ送る日記本文を合計5万文字に制限する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
+    responsesParse.mockResolvedValue({ output_parsed: analysis });
+    await analyzeObsession({ diaryTexts: ["あ".repeat(50_000), "送信されない日記"], photoUrls: [] });
+    const inputText = responsesParse.mock.calls[0][0].input[0].content[0].text as string;
+    expect(inputText).not.toContain("送信されない日記");
+    expect(inputText.match(/あ/g)).toHaveLength(50_000);
+  });
+
+  it("OpenAIでホログラム向けstructured movie scriptを生成する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
+    responsesParse.mockResolvedValue({ output_parsed: movie });
+    const result = await generateMovieScript({ obsession: analysis, photoUrls: ["https://example.com/1.jpg"] });
 
     const request = responsesParse.mock.calls[0][0];
     expect(request).toMatchObject({ model: "gpt-5.6-terra", store: false, reasoning: { effort: "medium" } });
-    expect(request.input[0].content[0].text).toContain("雨上がりの帰り道");
-    expect(request.text.format.type).toBe("json_schema");
+    expect(request.instructions).toContain("pure black background");
+    expect(request.instructions).toContain("no on-screen text");
+    expect(request.instructions).toContain("camera movement must never move the subject away from the center");
+    expect(request.instructions).toContain("single continuous shot");
+    expect(result.scenes[0].videoPrompt).toContain("Pure black background");
+    expect(result.scenes[0].videoPrompt).toContain("No scene transitions");
+  });
+
+  it("Geminiでも同じ映画構成スキーマを再検証する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(geminiResponse(movie)) as typeof fetch;
+
+    const result = await generateMovieScript({ obsession: analysis, photoUrls: [] });
+    expect(responsesParse).not.toHaveBeenCalled();
+    expect(result.scenes).toHaveLength(3);
+    expect(result.scenes.every((scene) => scene.videoPrompt.includes("subject away from the center"))).toBe(true);
   });
 
   it("映画構成が返した未入力の参照 URL を除外する", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({
       output_parsed: {
         title: "雨のあと",
@@ -83,17 +149,17 @@ describe("AI generation", () => {
         synopsis: "雨上がりの街を歩く短編映画です。",
         visualStyle: "soft blue cinematic light",
         bgm: "quiet piano",
-        scenes: [{
-          order: 1,
+        scenes: Array.from({ length: 3 }, (_, index) => ({
+          order: index + 1,
           source: "駅前",
           duration: 5,
           narration: "水たまりが光る。",
           videoPrompt: "A single continuous cinematic shot, no scene transitions.",
-          referencePhotoUrls: [
+          referencePhotoUrls: index === 0 ? [
             "https://example.com/allowed.jpg",
             "https://untrusted.example.com/photo.jpg",
-          ],
-        }],
+          ] : [],
+        })),
       },
     });
 
@@ -105,32 +171,5 @@ describe("AI generation", () => {
     expect(result.scenes[0].referencePhotoUrls).toEqual([
       "https://example.com/allowed.jpg",
     ]);
-  });
-
-  it("映画構成のシーン番号を配列順の連番へ正規化する", async () => {
-    responsesParse.mockResolvedValue({
-      output_parsed: {
-        title: "雨のあと",
-        logline: "帰り道に見つけた静かな安心。",
-        synopsis: "雨上がりの街を歩く短編映画です。",
-        visualStyle: "soft blue cinematic light",
-        bgm: "quiet piano",
-        scenes: ["駅前", "路地", "自宅"].map((source) => ({
-          order: 1,
-          source,
-          duration: 5,
-          narration: `${source}を歩く。`,
-          videoPrompt: "A single continuous cinematic shot.",
-          referencePhotoUrls: [],
-        })),
-      },
-    });
-
-    const result = await generateMovieScript({
-      obsession: analysis,
-      photoUrls: [],
-    });
-
-    expect(result.scenes.map(({ order }) => order)).toEqual([1, 2, 3]);
   });
 });

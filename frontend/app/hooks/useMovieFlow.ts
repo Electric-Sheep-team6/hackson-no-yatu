@@ -1,62 +1,25 @@
 "use client";
 
-import {
-  type ChangeEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ChangeEvent, useCallback, useEffect, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
-import {
-  emailSchema,
-  isAllowedPhotoMimeType,
-  MAX_PHOTO_BYTES,
-} from "@/lib/validation";
+import { emailSchema } from "@/lib/validation";
 
 type Diary = { id: string; content: string; createdAt: string };
 type PhotoPreview = { id: string; name: string; previewUrl: string };
 type Obsession = { id: string; title: string; reason: string };
-type Movie = {
-  id: string;
-  status: string;
-  errorMessage: string | null;
-  videoUrl: string | null;
-  movie: {
-    title: string;
-    scenes: { order: number; source: string; narration: string }[];
-  } | null;
-};
-
+type Movie = { id: string; status: string; errorMessage: string | null; videoUrl: string | null; movie: { title: string; scenes: { order: number; source: string; narration: string }[] } | null };
 type Busy = "auth" | "diary" | "upload" | "analysis" | "movie" | null;
 
-const AUTH_ERROR_MESSAGES: Record<string, string> = {
-  missing_code: "認証リンクが不正です。確認メールからもう一度開いてください。",
-  confirmation_failed:
-    "メールアドレスを確認できませんでした。リンクの期限を確認してください。",
-};
-
-export type MessageTone = "success" | "error" | "info";
-export type MessageArea = "auth" | "library" | "analysis" | "movie";
-export type FlowMessage = {
-  text: string;
-  tone: MessageTone;
-  area: MessageArea;
-};
-
-export type UploadProgress = { current: number; total: number };
-
 async function responseError(response: Response) {
-  return (
-    (await response.json().catch(() => null))?.message ?? "通信に失敗しました。"
-  );
+  return (await response.json().catch(() => null))?.message ?? "通信に失敗しました。";
 }
 
 export function useMovieFlow() {
   const [diaryDraft, setDiaryDraft] = useState("");
   const [diaries, setDiaries] = useState<Diary[]>([]);
   const [photoCount, setPhotoCount] = useState(0);
+  const [videoCount, setVideoCount] = useState(0);
   const [newPhotos, setNewPhotos] = useState<PhotoPreview[]>([]);
   const [obsession, setObsession] = useState<Obsession | null>(null);
   const [movie, setMovie] = useState<Movie | null>(null);
@@ -64,586 +27,138 @@ export function useMovieFlow() {
   const [password, setPassword] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
-  const [message, setMessage] = useState<FlowMessage | null>(null);
-  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState<
-    string | null
-  >(null);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
-    null,
-  );
-
-  // 破棄時に revokeObjectURL するため、最新のプレビュー一覧を ref に同期しておく。
-  const newPhotosRef = useRef<PhotoPreview[]>([]);
-  const libraryRefreshVersionRef = useRef(0);
-
-  useEffect(() => {
-    newPhotosRef.current = newPhotos;
-  }, [newPhotos]);
-
-  const showMessage = useCallback(
-    (text: string, tone: MessageTone, area: MessageArea) => {
-      setMessage({ text, tone, area });
-    },
-    [],
-  );
-
-  const revokePhotoPreviews = useCallback((photos: PhotoPreview[]) => {
-    for (const photo of photos) {
-      URL.revokeObjectURL(photo.previewUrl);
-    }
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const authError = params.get("auth_error");
-    if (!authError) return;
-
-    let active = true;
-    queueMicrotask(() => {
-      if (!active) return;
-      showMessage(
-        AUTH_ERROR_MESSAGES[authError] ?? "認証を完了できませんでした。",
-        "error",
-        "auth",
-      );
-    });
-    params.delete("auth_error");
-    const search = params.toString();
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`,
-    );
-    return () => {
-      active = false;
-    };
-  }, [showMessage]);
-
-  const clearUserData = useCallback(() => {
-    libraryRefreshVersionRef.current += 1;
-    revokePhotoPreviews(newPhotosRef.current);
-    newPhotosRef.current = [];
-
-    setDiaries([]);
-    setPhotoCount(0);
-    setNewPhotos([]);
-    setObsession(null);
-    setMovie(null);
-    setUserEmail(null);
-    setDiaryDraft("");
-    setUploadProgress(null);
-  }, [revokePhotoPreviews]);
+  const [message, setMessage] = useState<string | null>(null);
 
   const refreshLibrary = useCallback(async () => {
-    const refreshVersion = libraryRefreshVersionRef.current + 1;
-    libraryRefreshVersionRef.current = refreshVersion;
-    const isCurrentRefresh = () =>
-      libraryRefreshVersionRef.current === refreshVersion;
-    const fetchSafely = (path: string) => fetch(path).catch(() => null);
-    const [
-      diariesResponse,
-      photosResponse,
-      obsessionsResponse,
-      moviesResponse,
-    ] = await Promise.all([
-      fetchSafely("/api/diaries"),
-      fetchSafely("/api/photos"),
-      fetchSafely("/api/obsessions"),
-      fetchSafely("/api/movies"),
-    ]);
-    if (!isCurrentRefresh()) return;
-
-    if (diariesResponse?.ok) {
-      const { items } = (await diariesResponse.json()) as { items: Diary[] };
-      if (!isCurrentRefresh()) return;
-      setDiaries(items);
-    }
-
-    if (photosResponse?.ok) {
-      const { items } = (await photosResponse.json()) as { items: unknown[] };
-      if (!isCurrentRefresh()) return;
-      setPhotoCount(items.length);
-    }
-
-    if (obsessionsResponse?.ok) {
-      const { items } = (await obsessionsResponse.json()) as {
-        items: Obsession[];
-      };
-      if (!isCurrentRefresh()) return;
-      setObsession(items[0] ?? null);
-    }
-
-    if (moviesResponse?.ok) {
-      const { items } = (await moviesResponse.json()) as {
-        items: { id: string; status: string }[];
-      };
-      if (!isCurrentRefresh()) return;
-      const latestMovie = items[0];
-
-      if (!latestMovie) {
-        setMovie(null);
-      } else {
-        const movieResponse = await fetchSafely(`/api/movies/${latestMovie.id}`);
-        if (movieResponse?.ok) {
-          const restoredMovie = (await movieResponse.json()) as Movie;
-          if (!isCurrentRefresh()) return;
-          setMovie(restoredMovie);
-          if (!["completed", "failed"].includes(restoredMovie.status)) {
-            setBusy("movie");
-          }
-        }
-      }
-    }
+    const [diariesResponse, photosResponse, videosResponse] = await Promise.all([fetch("/api/diaries"), fetch("/api/photos"), fetch("/api/videos")]);
+    if (diariesResponse.ok) setDiaries((await diariesResponse.json() as { items: Diary[] }).items);
+    if (photosResponse.ok) setPhotoCount((await photosResponse.json() as { items: unknown[] }).items.length);
+    if (videosResponse.ok) setVideoCount((await videosResponse.json() as { items: unknown[] }).items.length);
   }, []);
 
-  const authenticate = useCallback(
-    async (mode: "signIn" | "signUp") => {
-      if (busy !== null) return;
-
-      const normalizedEmail = email.trim();
-
-      if (!emailSchema.safeParse(normalizedEmail).success) {
-        showMessage("メールアドレスの形式が正しくありません。", "error", "auth");
-        return;
-      }
-
-      setBusy("auth");
-      setMessage(null);
-
-      try {
-        const supabase = createClient();
-
-        const { data, error } =
-          mode === "signIn"
-            ? await supabase.auth.signInWithPassword({
-                email: normalizedEmail,
-                password,
-              })
-            : await supabase.auth.signUp({
-                email: normalizedEmail,
-                password,
-                options: {
-                  emailRedirectTo: `${window.location.origin}/auth/callback`,
-                },
-              });
-
-        if (error) throw error;
-
-        setUserEmail(data.session?.user.email ?? null);
-        setPassword("");
-
-        if (data.session) {
-          setPendingConfirmationEmail(null);
-          await refreshLibrary();
-        }
-
-        if (mode === "signUp" && !data.session) {
-          setPendingConfirmationEmail(normalizedEmail);
-          showMessage(
-            `${normalizedEmail} 宛に確認メールを送信しました。`,
-            "info",
-            "auth",
-          );
-        } else if (mode === "signUp") {
-          showMessage("アカウントを作成しました。", "success", "auth");
-        } else {
-          setPendingConfirmationEmail(null);
-          showMessage(
-            "ログインしました。保存済みの記録を読み込みました。",
-            "success",
-            "auth",
-          );
-        }
-      } catch (error) {
-        showMessage(
-          error instanceof Error ? error.message : "認証に失敗しました。",
-          "error",
-          "auth",
-        );
-      } finally {
-        setBusy((current) => (current === "auth" ? null : current));
-      }
-    },
-    [busy, email, password, refreshLibrary, showMessage],
-  );
-
-  const signOut = useCallback(async () => {
-    if (busy !== null && busy !== "movie") return;
-
-    setBusy("auth");
-    setMessage(null);
-
+  const authenticate = async (mode: "signIn" | "signUp") => {
+    const normalizedEmail = email.trim();
+    if (!emailSchema.safeParse(normalizedEmail).success) {
+      setMessage("メールアドレスの形式が正しくありません。");
+      return;
+    }
+    setBusy("auth"); setMessage(null);
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signOut();
-
+      const { data, error } = mode === "signIn"
+        ? await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
+        : await supabase.auth.signUp({
+            email: normalizedEmail,
+            password,
+            options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          });
       if (error) throw error;
+      setUserEmail(data.session?.user.email ?? null); setPassword("");
+      if (data.session) await refreshLibrary();
+      setMessage(mode === "signUp" && !data.session ? "確認メールを送信しました。確認後にログインしてください。" : mode === "signUp" ? "アカウントを作成しました。" : "ログインしました。保存済みの記録を読み込みました。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "認証に失敗しました。"); }
+    finally { setBusy(null); }
+  };
 
-      clearUserData();
-      setPendingConfirmationEmail(null);
-      setPassword("");
-
-      showMessage(
-        "ログアウトしました。端末上の表示データも初期化しました。",
-        "success",
-        "auth",
-      );
-    } catch (error) {
-      showMessage(
-        error instanceof Error ? error.message : "ログアウトに失敗しました。",
-        "error",
-        "auth",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }, [busy, clearUserData, showMessage]);
-
-  const saveDiary = useCallback(async () => {
-    if (busy !== null) return;
-
-    if (!userEmail) {
-      showMessage("日記を保存するにはログインしてください。", "error", "library");
-      return;
-    }
-
+  const saveDiary = async () => {
     if (!diaryDraft.trim()) return;
-
-    setBusy("diary");
-    setMessage(null);
-
+    setBusy("diary"); setMessage(null);
     try {
-      const response = await fetch("/api/diaries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: diaryDraft.trim() }),
-      });
-
+      const response = await fetch("/api/diaries", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: diaryDraft.trim() }) });
       if (!response.ok) throw new Error(await responseError(response));
+      const diary = await response.json() as Diary;
+      setDiaries((current) => [diary, ...current]); setDiaryDraft(""); setMessage("日記を保存しました。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "日記を保存できませんでした。"); }
+    finally { setBusy(null); }
+  };
 
-      const diary = (await response.json()) as Diary;
-
-      setDiaries((current) => [diary, ...current]);
-      setDiaryDraft("");
-      showMessage("日記を保存しました。", "success", "library");
-    } catch (error) {
-      showMessage(
-        error instanceof Error ? error.message : "日記を保存できませんでした。",
-        "error",
-        "library",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }, [busy, diaryDraft, showMessage, userEmail]);
-
-  const uploadPhotos = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(event.target.files ?? []);
-      event.target.value = "";
-
-      if (!files.length) return;
-      if (busy !== null) return;
-
-      if (!userEmail) {
-        showMessage("写真を追加するにはログインしてください。", "error", "library");
-        return;
-      }
-
-      setBusy("upload");
-      setMessage(null);
-      setUploadProgress({ current: 1, total: files.length });
-
+  const uploadPhotos = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    setBusy("upload"); setMessage(null);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("ログインしてから写真を追加してください。");
       const previews: PhotoPreview[] = [];
-
-      try {
-        const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user) {
-          throw new Error("ログインしてから写真を追加してください。");
-        }
-
-        for (let index = 0; index < files.length; index += 1) {
-          const file = files[index];
-
-          setUploadProgress({ current: index + 1, total: files.length });
-
-          if (!isAllowedPhotoMimeType(file.type)) {
-            throw new Error("JPEG、PNG、WebP形式の画像を選択してください。");
-          }
-          if (file.size === 0) {
-            throw new Error("空の画像ファイルはアップロードできません。");
-          }
-          if (file.size > MAX_PHOTO_BYTES) {
-            throw new Error("画像ファイルは10MB以下にしてください。");
-          }
-
-          const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
-          const storagePath = `${user.id}/${crypto.randomUUID()}.${extension}`;
-
-          const { error } = await supabase.storage
-            .from("photos")
-            .upload(storagePath, file, { contentType: file.type });
-
-          if (error) throw error;
-
-          const response = await fetch("/api/photos", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ storagePath }),
-          });
-
-          if (!response.ok) {
-            const message = await responseError(response);
-            const { error: cleanupError } = await supabase.storage
-              .from("photos")
-              .remove([storagePath]);
-            if (cleanupError) {
-              console.error("Failed to remove orphaned photo", {
-                storagePath,
-                cleanupError,
-              });
-            }
-            throw new Error(message);
-          }
-
-          previews.push({
-            id: crypto.randomUUID(),
-            name: file.name,
-            previewUrl: URL.createObjectURL(file),
-          });
-        }
-
-        setNewPhotos((current) => [...previews, ...current]);
-        setPhotoCount((count) => count + previews.length);
-
-        showMessage(
-          `${previews.length}枚の写真を保存しました。`,
-          "success",
-          "library",
-        );
-      } catch (error) {
-        if (previews.length > 0) {
-          setNewPhotos((current) => [...previews, ...current]);
-          setPhotoCount((count) => count + previews.length);
-          showMessage(
-            `${previews.length}枚は保存しましたが、残りの写真を保存できませんでした。`,
-            "error",
-            "library",
-          );
-        } else {
-          revokePhotoPreviews(previews);
-          showMessage(
-            error instanceof Error
-              ? error.message
-              : "写真を保存できませんでした。",
-            "error",
-            "library",
-          );
-        }
-      } finally {
-        setUploadProgress(null);
-        setBusy(null);
+      for (const file of files) {
+        const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const storagePath = `${user.id}/${crypto.randomUUID()}.${extension}`;
+        const { error } = await supabase.storage.from("photos").upload(storagePath, file, { contentType: file.type });
+        if (error) throw error;
+        const response = await fetch("/api/photos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storagePath }) });
+        if (!response.ok) throw new Error(await responseError(response));
+        previews.push({ id: crypto.randomUUID(), name: file.name, previewUrl: URL.createObjectURL(file) });
       }
-    },
-    [busy, revokePhotoPreviews, showMessage, userEmail],
-  );
+      setNewPhotos((current) => [...previews, ...current]); setPhotoCount((count) => count + previews.length); setMessage(`${previews.length}枚の写真を保存しました。`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "写真を保存できませんでした。"); }
+    finally { setBusy(null); }
+  };
 
-  const analyze = useCallback(async () => {
-    if (busy !== null) return;
-
-    if (diaries.length + photoCount === 0) {
-      showMessage("先に日記または写真を保存してください。", "error", "analysis");
+  const uploadVideos = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    if (files.some((file) => file.size > 25 * 1024 * 1024)) {
+      setMessage("動画は1本25MB以下にしてください。");
       return;
     }
+    setBusy("upload"); setMessage(null);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("ログインしてから動画を追加してください。");
+      for (const file of files) {
+        const extension = file.name.split(".").pop()?.toLowerCase() || "mp4";
+        const storagePath = `${user.id}/${crypto.randomUUID()}.${extension}`;
+        const { error } = await supabase.storage.from("videos").upload(storagePath, file, { contentType: file.type });
+        if (error) throw error;
+        const response = await fetch("/api/videos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storagePath }) });
+        if (!response.ok) throw new Error(await responseError(response));
+      }
+      setVideoCount((count) => count + files.length);
+      setMessage(`${files.length}本の動画を保存しました。`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "動画を保存できませんでした。"); }
+    finally { setBusy(null); }
+  };
 
-    setBusy("analysis");
-    setMessage(null);
-
+  const analyze = async () => {
+    if (diaries.length + photoCount === 0) return setMessage("偏愛分析のため、先に日記か写真を保存してください。動画は映画の編集素材として使われます。");
+    setBusy("analysis"); setMessage(null);
     try {
       const response = await fetch("/api/obsessions", { method: "POST" });
-
       if (!response.ok) throw new Error(await responseError(response));
+      const next = await response.json() as Obsession;
+      setObsession(next); setMessage(`${diaries.length}件の日記と${photoCount}枚の写真を分析しました。${videoCount}本の動画は編集素材として使います。`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "分析に失敗しました。"); }
+    finally { setBusy(null); }
+  };
 
-      const next = (await response.json()) as Obsession;
-
-      setObsession(next);
-      showMessage(
-        `${diaries.length}件の日記と${photoCount}枚の写真を分析しました。`,
-        "success",
-        "analysis",
-      );
-    } catch (error) {
-      showMessage(
-        error instanceof Error ? error.message : "分析に失敗しました。",
-        "error",
-        "analysis",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }, [busy, diaries.length, photoCount, showMessage]);
-
-  const generate = useCallback(async () => {
-    if (busy !== null) return;
-
-    if (!obsession) {
-      showMessage("先に偏愛を分析してください。", "error", "movie");
-      return;
-    }
-
-    setBusy("movie");
-    setMessage(null);
-
+  const generate = async () => {
+    if (!obsession) return setMessage("先に偏愛を分析してください。");
+    if (photoCount === 0) return setMessage("映画生成には、人物の記録写真を1枚以上追加してください。");
+    setBusy("movie"); setMessage(null);
     try {
-      const response = await fetch("/api/movies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ obsessionId: obsession.id }),
-      });
-
+      const response = await fetch("/api/movies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ obsessionId: obsession.id }) });
       if (!response.ok) throw new Error(await responseError(response));
+      const created = await response.json() as { id: string; status: string };
+      setMovie({ ...created, errorMessage: null, videoUrl: null, movie: null }); setMessage("映画の生成を開始しました。完了までお待ちください。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "映画生成を開始できませんでした。"); setBusy(null); }
+  };
 
-      const created = (await response.json()) as {
-        id: string;
-        status: string;
-      };
-
-      setMovie({
-        ...created,
-        errorMessage: null,
-        videoUrl: null,
-        movie: null,
-      });
-
-      showMessage(
-        "映画の生成を開始しました。完了までお待ちください。",
-        "info",
-        "movie",
-      );
-    } catch (error) {
-      showMessage(
-        error instanceof Error
-          ? error.message
-          : "映画生成を開始できませんでした。",
-        "error",
-        "movie",
-      );
-      setBusy(null);
-    }
-  }, [busy, obsession, showMessage]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const restoreSession = async () => {
-      try {
-        const { data } = await createClient().auth.getUser();
-        if (cancelled) return;
-
-        setUserEmail(data.user?.email ?? null);
-
-        if (data.user) {
-          setPendingConfirmationEmail(null);
-          await refreshLibrary();
-        }
-      } catch {
-        if (!cancelled) {
-          setUserEmail(null);
-          showMessage(
-            "ログイン状態を確認できませんでした。通信環境を確認してください。",
-            "error",
-            "auth",
-          );
-        }
-      }
-    };
-
-    void restoreSession();
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshLibrary, showMessage]);
-
+  useEffect(() => { try { void createClient().auth.getUser().then(({ data }) => { setUserEmail(data.user?.email ?? null); if (data.user) void refreshLibrary(); }); } catch { /* env is validated when used */ } }, [refreshLibrary]);
   useEffect(() => {
     if (!movie || ["completed", "failed"].includes(movie.status)) return;
+    const timer = window.setInterval(async () => {
+      const response = await fetch(`/api/movies/${movie.id}`);
+      if (!response.ok) return;
+      const next = await response.json() as Movie;
+      setMovie(next);
+      if (["completed", "failed"].includes(next.status)) { setBusy(null); setMessage(next.status === "completed" ? "映画が完成しました。" : next.errorMessage ?? "映画生成に失敗しました。"); }
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [movie]);
 
-    let cancelled = false;
-    let requestInFlight = false;
-
-    const pollMovie = async () => {
-      if (requestInFlight) return;
-      requestInFlight = true;
-
-      try {
-        const response = await fetch(`/api/movies/${movie.id}`);
-
-        if (cancelled || !response.ok) return;
-
-        const next = (await response.json()) as Movie;
-        if (cancelled) return;
-
-        setMovie(next);
-
-        if (["completed", "failed"].includes(next.status)) {
-          setBusy((current) => (current === "movie" ? null : current));
-
-          if (next.status === "completed") {
-            showMessage("映画が完成しました。", "success", "movie");
-          } else {
-            showMessage(
-              next.errorMessage ?? "映画生成に失敗しました。",
-              "error",
-              "movie",
-            );
-          }
-        }
-      } catch {
-        // Transient network failures are retried by the next polling interval.
-      } finally {
-        requestInFlight = false;
-      }
-    };
-
-    const timer = window.setInterval(() => void pollMovie(), 2_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [movie, showMessage]);
-
-  useEffect(() => {
-    return () => {
-      revokePhotoPreviews(newPhotosRef.current);
-    };
-  }, [revokePhotoPreviews]);
-
-  return {
-    diaryDraft,
-    setDiaryDraft,
-    diaries,
-    photoCount,
-    newPhotos,
-    obsession,
-    movie,
-    email,
-    setEmail,
-    password,
-    setPassword,
-    userEmail,
-    busy,
-    message,
-    pendingConfirmationEmail,
-    uploadProgress,
-    authenticate,
-    signOut,
-    saveDiary,
-    uploadPhotos,
-    analyze,
-    generate,
-  };
+  return { diaryDraft, setDiaryDraft, diaries, photoCount, videoCount, newPhotos, obsession, movie, email, setEmail, password, setPassword, userEmail, busy, message, authenticate, saveDiary, uploadPhotos, uploadVideos, analyze, generate };
 }

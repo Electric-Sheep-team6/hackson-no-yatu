@@ -1,183 +1,16 @@
 import { after, NextResponse } from "next/server";
 
 import type { ObsessionAnalysis } from "@/lib/ai/analyzeObsession";
-import { generateMovieScript } from "@/lib/ai/generateMovieScript";
-import { composeMovie } from "@/lib/ai/video/composeMovie";
-import { geminiVideoGenerator } from "@/lib/ai/video/geminiVideoGenerator";
-import { formatMovieGenerationError } from "@/lib/ai/video/movieGenerationError";
-import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { ApiError, errorResponse } from "@/lib/apiError";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import {
-  createMovieSchema,
-  isOwnedPhotoStoragePath,
-} from "@/lib/validation";
+import { createMovieSchema } from "@/lib/validation";
+
+import { processMovieGeneration } from "./generation";
 
 export const runtime = "nodejs";
+// シーン生成1波（最大120秒）+ 連結（最大120秒）を300秒以内で完了させる。
 export const maxDuration = 300;
-
-async function processMovieGeneration(
-  movieId: string,
-  userId: string,
-  obsession: ObsessionAnalysis,
-) {
-  const admin = createAdminClient();
-  let stage: Parameters<typeof formatMovieGenerationError>[0] = "写真の準備";
-  const uploadedMoviePaths: string[] = [];
-
-  try {
-    let result = await admin
-      .from("movies")
-      .update({ status: "analyzing", updated_at: new Date().toISOString() })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-
-    stage = "写真の準備";
-    const photosResult = await admin
-      .from("photos")
-      .select("storage_path")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(12);
-    if (photosResult.error) throw photosResult.error;
-
-    const ownedPhotoPaths = photosResult.data
-      .map(({ storage_path }) => storage_path)
-      .filter((storagePath) => isOwnedPhotoStoragePath(storagePath, userId));
-    const signedUrlResults = await Promise.all(
-      ownedPhotoPaths.map((storagePath) =>
-        admin.storage.from("photos").createSignedUrl(storagePath, 3600),
-      ),
-    );
-    const photoUrls = signedUrlResults.flatMap(({ data, error }) =>
-      error || !data ? [] : [data.signedUrl],
-    );
-
-    result = await admin
-      .from("movies")
-      .update({ status: "generating", updated_at: new Date().toISOString() })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-
-    stage = "映画構成の作成";
-    const movie = await generateMovieScript({ obsession, photoUrls });
-
-    result = await admin
-      .from("movies")
-      .update({
-        status: "processing",
-        movie_json: movie,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-
-    stage = "シーン動画の生成";
-    const sceneResults = await Promise.allSettled(movie.scenes.map(async (scene) => {
-      const generated = await geminiVideoGenerator.generateScene({
-        prompt: scene.videoPrompt,
-        duration: scene.duration,
-        referenceImageUrls: selectReferenceImageUrls(
-          scene.referencePhotoUrls,
-          photoUrls,
-        ),
-      });
-      if (!generated.videoData) throw new Error("動画データがありません");
-      const path = `${userId}/${movieId}/scenes/${scene.order}.mp4`;
-      const { error: uploadError } = await admin.storage
-        .from("movies")
-        .upload(path, generated.videoData, { contentType: "video/mp4", upsert: true });
-      if (uploadError) throw uploadError;
-      uploadedMoviePaths.push(path);
-
-      const heartbeatResult = await admin
-        .from("movies")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", movieId)
-        .eq("user_id", userId);
-      if (heartbeatResult.error) throw heartbeatResult.error;
-
-      return {
-        generatedScene: {
-          order: scene.order,
-          path,
-          providerJobId: generated.providerJobId,
-        },
-        videoData: generated.videoData,
-      };
-    }));
-    const failedScene = sceneResults.find(
-      (sceneResult) => sceneResult.status === "rejected",
-    );
-    if (failedScene?.status === "rejected") throw failedScene.reason;
-
-    const completedScenes = sceneResults.flatMap((sceneResult) =>
-      sceneResult.status === "fulfilled" ? [sceneResult.value] : [],
-    );
-    const generatedScenes = completedScenes.map(
-      ({ generatedScene }) => generatedScene,
-    );
-    const sceneVideos = completedScenes.map(({ videoData }) => videoData);
-
-    stage = "映像の結合";
-    const finalVideo = await composeMovie(sceneVideos);
-    const finalPath = `${userId}/${movieId}.mp4`;
-    stage = "完成動画の保存";
-    const { error: finalUploadError } = await admin.storage.from("movies").upload(
-      finalPath,
-      finalVideo,
-      { contentType: "video/mp4", upsert: true },
-    );
-    if (finalUploadError) throw finalUploadError;
-    uploadedMoviePaths.push(finalPath);
-
-    result = await admin
-      .from("movies")
-      .update({
-        status: "completed",
-        movie_json: { ...movie, generatedScenes },
-        video_path: finalPath,
-        error_message: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-    if (result.error) throw result.error;
-  } catch (error) {
-    console.error("Movie generation failed", { movieId, userId, stage, error });
-    const { error: updateError } = await admin
-      .from("movies")
-      .update({
-        status: "failed",
-        error_message: formatMovieGenerationError(stage, error),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", movieId)
-      .eq("user_id", userId);
-
-    if (updateError) {
-      console.error(updateError);
-      return;
-    }
-
-    if (uploadedMoviePaths.length > 0) {
-      const { error: cleanupError } = await admin.storage
-        .from("movies")
-        .remove(uploadedMoviePaths);
-      if (cleanupError) {
-        console.error("Failed to remove incomplete movie files", {
-          movieId,
-          uploadedMoviePaths,
-          cleanupError,
-        });
-      }
-    }
-  }
-}
 
 export async function POST(request: Request) {
   try {
@@ -230,12 +63,6 @@ export async function POST(request: Request) {
         "生成中の映画があります。完了後に再度お試しください",
       );
     }
-    if (
-      movieError?.code === "P0001" &&
-      movieError.message === "movie_generation_rate_limit"
-    ) {
-      throw new ApiError(429, "rate_limited", "映画生成は24時間に10回までです");
-    }
     if (movieError) throw movieError;
 
     after(() =>
@@ -251,10 +78,9 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "POST /api/movies" });
   }
 }
-
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -284,6 +110,6 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "GET /api/movies" });
   }
 }

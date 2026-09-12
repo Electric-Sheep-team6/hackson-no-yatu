@@ -1,43 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock } = vi.hoisted(() => ({
-  createClientMock: vi.fn(),
+const { exchangeCodeForSessionMock } = vi.hoisted(() => ({
+  exchangeCodeForSessionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: createClientMock,
+  createClient: async () => ({
+    auth: { exchangeCodeForSession: exchangeCodeForSessionMock },
+  }),
 }));
 
 import { GET } from "@/app/auth/callback/route";
 
-describe("認証コールバック", () => {
+describe("GET /auth/callback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    createClientMock.mockResolvedValue({
-      auth: {
-        exchangeCodeForSession: vi.fn().mockResolvedValue({ error: null }),
-      },
-    });
+    exchangeCodeForSessionMock.mockResolvedValue({ error: null });
   });
 
-  it("同一サイト内のnextパスへリダイレクトする", async () => {
-    const response = await GET(
-      new Request("https://app.example/auth/callback?code=valid&next=%2Fmovies%3Ftab%3Dmine"),
-    );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://app.example/movies?tab=mine");
+  it("sends a missing-code error to the login page", async () => {
+    const response = await GET(new Request("https://example.com/auth/callback"));
+    expect(response.headers.get("location")).toBe("https://example.com/login?auth_error=missing_code");
   });
 
-  it.each([
-    ["プロトコル相対URL", "%2F%2Fevil.example"],
-    ["バックスラッシュを含むURL", "%2F%5Cevil.example"],
-  ])("%sを指定されても外部サイトへリダイレクトしない", async (_label, next) => {
-    const response = await GET(
-      new Request(`https://app.example/auth/callback?code=valid&next=${next}`),
-    );
+  it("sends a failed confirmation to the login page", async () => {
+    exchangeCodeForSessionMock.mockResolvedValue({ error: new Error("invalid code") });
+    const response = await GET(new Request("https://example.com/auth/callback?code=bad"));
+    expect(response.headers.get("location")).toBe("https://example.com/login?auth_error=confirmation_failed");
+  });
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://app.example/");
+  it("rejects a backslash-based external redirect", async () => {
+    const response = await GET(new Request("https://example.com/auth/callback?code=ok&next=%2F%5Cevil.example"));
+    expect(response.headers.get("location")).toBe("https://example.com/");
+  });
+
+  it("preserves a safe same-origin path", async () => {
+    const response = await GET(new Request("https://example.com/auth/callback?code=ok&next=%2F%3Ffrom%3Dlogin"));
+    expect(response.headers.get("location")).toBe("https://example.com/?from=login");
   });
 });

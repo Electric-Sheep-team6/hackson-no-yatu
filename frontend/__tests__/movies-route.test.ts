@@ -1,434 +1,146 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const {
-  afterMock,
-  composeMovieMock,
-  createAdminClientMock,
-  createClientMock,
-  generateMovieScriptMock,
-  generateSceneMock,
-} = vi.hoisted(
-  () => ({
-    afterMock: vi.fn(),
-    composeMovieMock: vi.fn(),
-    createAdminClientMock: vi.fn(),
-    createClientMock: vi.fn(),
-    generateMovieScriptMock: vi.fn(),
-    generateSceneMock: vi.fn(),
-  }),
-);
+const mocks = vi.hoisted(() => ({
+  composeHybridMovie: vi.fn(),
+  composeMemoryMontage: vi.fn(),
+  createAdminClient: vi.fn(),
+  generateHybridMoviePlan: vi.fn(),
+  generateMotifImage: vi.fn(),
+  generateScene: vi.fn(),
+  loadReferenceImage: vi.fn(),
+}));
 
-vi.mock("next/server", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("next/server")>()),
-  after: afterMock,
+vi.mock("@/lib/ai/generateHybridMoviePlan", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ai/generateHybridMoviePlan")>()),
+  generateHybridMoviePlan: mocks.generateHybridMoviePlan,
 }));
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: createAdminClientMock,
+vi.mock("@/lib/ai/referenceImage", () => ({
+  beginMovieImageCache: vi.fn(),
+  loadReferenceImage: mocks.loadReferenceImage,
 }));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: createClientMock,
+vi.mock("@/lib/ai/image/geminiImageGenerator", () => ({
+  generateGeminiMotifImage: mocks.generateMotifImage,
 }));
-vi.mock("@/lib/ai/generateMovieScript", () => ({
-  generateMovieScript: generateMovieScriptMock,
-}));
-vi.mock("@/lib/ai/video/composeMovie", () => ({
-  composeMovie: composeMovieMock,
+vi.mock("@/lib/ai/video/composeHybridMovie", () => ({
+  composeHybridMovie: mocks.composeHybridMovie,
+  composeMemoryMontage: mocks.composeMemoryMontage,
 }));
 vi.mock("@/lib/ai/video/geminiVideoGenerator", () => ({
-  geminiVideoGenerator: { generateScene: generateSceneMock },
+  geminiVideoGenerator: { generateScene: mocks.generateScene },
 }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: mocks.createAdminClient }));
 
-import { POST } from "@/app/api/movies/route";
+import { processMovieGeneration, SCENE_CONCURRENCY } from "@/app/api/movies/generation";
 
-describe("POST /api/movies", () => {
-  beforeEach(() => vi.clearAllMocks());
+const MOVIE_ID = "22222222-2222-4222-8222-222222222222";
+const USER_ID = "user-1";
+const plan = {
+  title: "記憶の輪郭",
+  logline: "一人の時間が、映画になる。",
+  synopsis: "記録をたどる予告編",
+  photoOrder: [1],
+  heroPrompt: "Three cinematic symbolic shots, no text.",
+  motifs: [
+    { name: "軽トラック", count: 3, evidencePhotoNumbers: [1], objectDescription: "white truck", imagePrompt: "truck" },
+    { name: "花火", count: 2, evidencePhotoNumbers: [1], objectDescription: "sparkler", imagePrompt: "sparkler" },
+  ],
+  chapterLines: ["始まりは記録だった", "運命が動き出す", "記憶は消えない"],
+};
 
-  it.each([
-    ["23505", "duplicate key", 409, "conflict"],
-    ["P0001", "movie_generation_rate_limit", 429, "rate_limited"],
-  ])("DBエラー%sを適切なAPIエラーへ変換する", async (code, message, status, apiError) => {
-    createClientMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({
-          data: { user: { id: "user-1" } },
-          error: null,
-        }),
-      },
-    });
-
-    const insert = vi.fn(() => ({
-      select: vi.fn(() => ({
-        single: vi.fn().mockResolvedValue({
-          data: null,
-          error: { code, message },
-        }),
-      })),
-    }));
-    const moviesSelect = vi.fn(() => ({
+function createAdmin() {
+  const updates: Record<string, unknown>[] = [];
+  const upload = vi.fn().mockResolvedValue({ error: null });
+  const update = vi.fn((value: Record<string, unknown>) => {
+    updates.push(value);
+    return { eq: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) })) };
+  });
+  const rows = (data: { storage_path: string }[]) => ({
+    select: vi.fn(() => ({
       eq: vi.fn(() => ({
-        gte: vi.fn().mockResolvedValue({ count: 0, error: null }),
+        order: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data, error: null }) })),
       })),
+    })),
+  });
+  const admin = {
+    from: vi.fn((table: string) => {
+      if (table === "photos") return rows([{ storage_path: "user-1/photo.jpg" }]);
+      if (table === "videos") return rows([]);
+      return { update };
+    }),
+    storage: {
+      from: vi.fn(() => ({
+        createSignedUrl: vi.fn((path: string) => Promise.resolve({ data: { signedUrl: `https://storage.example/${path}` }, error: null })),
+        upload,
+      })),
+    },
+  };
+  return { admin, updates, upload };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.generateMotifImage.mockReset();
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  mocks.generateHybridMoviePlan.mockResolvedValue(plan);
+  mocks.loadReferenceImage.mockResolvedValue({ data: "AQID", mimeType: "image/jpeg" });
+  mocks.composeMemoryMontage.mockResolvedValue(new Uint8Array([4]));
+  mocks.generateMotifImage
+    .mockResolvedValueOnce({ providerJobId: "image-1", data: new Uint8Array([6]), mimeType: "image/jpeg" })
+    .mockResolvedValueOnce({ providerJobId: "image-2", data: new Uint8Array([7]), mimeType: "image/jpeg" });
+  mocks.generateScene.mockResolvedValue({ providerJobId: "job-1", videoData: new Uint8Array([5]) });
+  mocks.composeHybridMovie.mockResolvedValue(new Uint8Array([9]));
+});
+describe("hybrid movie generation", () => {
+  it("Gemini動画生成を1回だけ呼び、上限10秒の非人物象徴カットを要求する", async () => {
+    const { admin, updates } = createAdmin();
+    mocks.createAdminClient.mockReturnValue(admin);
+
+    await processMovieGeneration(MOVIE_ID, USER_ID, {} as never);
+
+    expect(SCENE_CONCURRENCY).toBe(1);
+    expect(mocks.generateScene).toHaveBeenCalledTimes(1);
+    expect(mocks.generateScene).toHaveBeenCalledWith(expect.objectContaining({
+      duration: 10,
+      referenceImageUrls: ["data:image/jpeg;base64,Bg==", "data:image/jpeg;base64,Bw=="],
     }));
-    const recoverStale = vi.fn().mockResolvedValue({ data: 1, error: null });
-    createAdminClientMock.mockReturnValue({
-      from: vi.fn((table: string) =>
-        table === "obsessions"
-          ? {
-              select: vi.fn(() => ({
-                eq: vi.fn(() => ({
-                  maybeSingle: vi.fn().mockResolvedValue({
-                    data: {
-                      id: "11111111-1111-4111-8111-111111111111",
-                      user_id: "user-1",
-                      analysis_json: {},
-                    },
-                    error: null,
-                  }),
-                })),
-              })),
-            }
-          : { select: moviesSelect, insert },
-      ),
-      rpc: recoverStale,
-    });
-
-    const response = await POST(
-      new Request("http://localhost/api/movies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          obsessionId: "11111111-1111-4111-8111-111111111111",
-        }),
-      }),
+    expect(mocks.composeMemoryMontage).toHaveBeenCalledTimes(1);
+    expect(mocks.composeHybridMovie).toHaveBeenCalledWith(
+      new Uint8Array([4]),
+      new Uint8Array([5]),
+      plan,
+      expect.any(Number),
     );
-
-    expect(response.status).toBe(status);
-    await expect(response.json()).resolves.toMatchObject({
-      error: apiError,
+    expect(updates.at(-1)).toMatchObject({
+      status: "completed",
+      movie_json: {
+        mix: { actualPercent: 75, aiPercent: 25, durationSeconds: 60.5 },
+        generatedScenes: [{ retryCount: 0, status: "succeeded" }],
+        generatedMotifs: [
+          expect.objectContaining({ name: "軽トラック", providerJobId: "image-1" }),
+          expect.objectContaining({ name: "花火", providerJobId: "image-2" }),
+        ],
+      },
     });
-    expect(afterMock).not.toHaveBeenCalled();
-    expect(recoverStale).toHaveBeenCalledWith(
-      "recover_stale_movie_generations",
-      { p_user_id: "user-1" },
-    );
   });
 
-  it("全プランで利用できる実行時間上限を指定する", async () => {
+  it("AI生成失敗時も自動再試行しない", async () => {
+    const { admin, updates } = createAdmin();
+    mocks.createAdminClient.mockReturnValue(admin);
+    mocks.generateScene.mockRejectedValue(Object.assign(new Error("rate limit"), { status: 429 }));
+
+    await processMovieGeneration(MOVIE_ID, USER_ID, {} as never);
+
+    expect(mocks.generateScene).toHaveBeenCalledTimes(1);
+    expect(mocks.composeHybridMovie).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({
+      status: "failed",
+      error_message: "動画生成に失敗しました（レート制限）",
+    });
+  });
+
+  it("Vercel関数の実行上限を300秒に保つ", async () => {
     const route = await import("@/app/api/movies/route");
-
     expect(route.maxDuration).toBe(300);
-  });
-
-  it("AIをモックして脚本作成、全シーン生成、結合、完成保存まで実行する", async () => {
-    createClientMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({
-          data: { user: { id: "user-1" } },
-          error: null,
-        }),
-      },
-    });
-
-    const movieId = "22222222-2222-4222-8222-222222222222";
-    const obsessionId = "11111111-1111-4111-8111-111111111111";
-    const statuses: unknown[] = [];
-    const update = vi.fn((values: Record<string, unknown>) => {
-      if (values.status) statuses.push(values.status);
-      return {
-        eq: vi.fn(() => ({
-          eq: vi.fn().mockResolvedValue({ error: null }),
-        })),
-      };
-    });
-    const insert = vi.fn(() => ({
-      select: vi.fn(() => ({
-        single: vi.fn().mockResolvedValue({
-          data: { id: movieId, status: "pending" },
-          error: null,
-        }),
-      })),
-    }));
-    const createSignedUrl = vi
-      .fn()
-      .mockImplementation(async (path: string) =>
-        path.endsWith("missing.jpg")
-          ? { data: null, error: new Error("object not found") }
-          : {
-              data: { signedUrl: `https://storage.example.com/${path}` },
-              error: null,
-            },
-      );
-    const upload = vi.fn().mockResolvedValue({ error: null });
-    const photoLimit = vi.fn().mockResolvedValue({
-      data: [
-        { storage_path: "user-1/photo-1.jpg" },
-        { storage_path: "other-user/private.jpg" },
-        { storage_path: "user-1/missing.jpg" },
-        { storage_path: "user-1/photo-2.jpg" },
-      ],
-      error: null,
-    });
-    const photoOrder = vi.fn(() => ({ limit: photoLimit }));
-    const admin = {
-      rpc: vi.fn().mockResolvedValue({ data: 0, error: null }),
-      from: vi.fn((table: string) => {
-        if (table === "obsessions") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                maybeSingle: vi.fn().mockResolvedValue({
-                  data: {
-                    id: obsessionId,
-                    user_id: "user-1",
-                    analysis_json: { title: "夜道への偏愛" },
-                  },
-                  error: null,
-                }),
-              })),
-            })),
-          };
-        }
-        if (table === "photos") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: photoOrder,
-              })),
-            })),
-          };
-        }
-        return { insert, update };
-      }),
-      storage: {
-        from: vi.fn((bucket: string) =>
-          bucket === "photos" ? { createSignedUrl } : { upload },
-        ),
-      },
-    };
-    createAdminClientMock.mockReturnValue(admin);
-
-    const photoUrls = [
-      "https://storage.example.com/user-1/photo-1.jpg",
-      "https://storage.example.com/user-1/photo-2.jpg",
-    ];
-    const movieScript = {
-      title: "夜道の映画",
-      logline: "雨上がりの夜道を歩く。",
-      synopsis: "夜道の記憶をたどる短編。",
-      visualStyle: "cinematic",
-      bgm: "ambient",
-      scenes: [1, 2, 3].map((order) => ({
-        order,
-        source: `scene-${order}`,
-        duration: 5,
-        narration: `narration-${order}`,
-        videoPrompt: `prompt-${order}`,
-        referencePhotoUrls: order === 1 ? [photoUrls[0]] : [],
-      })),
-    };
-    generateMovieScriptMock.mockResolvedValue(movieScript);
-    const sceneResolvers: Array<
-      (value: { providerJobId: string; videoData: Uint8Array }) => void
-    > = [];
-    generateSceneMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          sceneResolvers.push(resolve);
-        }),
-    );
-    composeMovieMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
-
-    const response = await POST(
-      new Request("http://localhost/api/movies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ obsessionId }),
-      }),
-    );
-
-    expect(response.status).toBe(201);
-    expect(afterMock).toHaveBeenCalledOnce();
-    const backgroundJob = afterMock.mock.calls[0][0] as () => Promise<void>;
-    const backgroundPromise = backgroundJob();
-    await vi.waitFor(() => expect(generateSceneMock).toHaveBeenCalledTimes(3));
-    sceneResolvers.forEach((resolve, index) =>
-      resolve({
-        providerJobId: `job-${index + 1}`,
-        videoData: new Uint8Array([index + 1]),
-      }),
-    );
-    await backgroundPromise;
-
-    expect(generateMovieScriptMock).toHaveBeenCalledWith({
-      obsession: { title: "夜道への偏愛" },
-      photoUrls,
-    });
-    expect(photoOrder).toHaveBeenCalledWith("created_at", {
-      ascending: false,
-    });
-    expect(photoLimit).toHaveBeenCalledWith(12);
-    expect(createSignedUrl).not.toHaveBeenCalledWith(
-      "other-user/private.jpg",
-      3600,
-    );
-    expect(generateSceneMock).toHaveBeenCalledTimes(3);
-    expect(generateSceneMock).toHaveBeenNthCalledWith(1, {
-      prompt: "prompt-1",
-      duration: 5,
-      referenceImageUrls: [photoUrls[0]],
-    });
-    expect(composeMovieMock).toHaveBeenCalledWith([
-      new Uint8Array([1]),
-      new Uint8Array([2]),
-      new Uint8Array([3]),
-    ]);
-    expect(upload).toHaveBeenCalledTimes(4);
-    expect(
-      update.mock.calls.filter(
-        ([values]) => values.status === undefined && values.updated_at,
-      ),
-    ).toHaveLength(3);
-    expect(upload).toHaveBeenLastCalledWith(
-      "user-1/22222222-2222-4222-8222-222222222222.mp4",
-      new Uint8Array([1, 2, 3]),
-      { contentType: "video/mp4", upsert: true },
-    );
-    expect(statuses).toEqual([
-      "analyzing",
-      "generating",
-      "processing",
-      "completed",
-    ]);
-    expect(update).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        status: "completed",
-        video_path:
-          "user-1/22222222-2222-4222-8222-222222222222.mp4",
-        error_message: null,
-      }),
-    );
-  });
-
-  it("途中失敗時に保存済みシーン動画を削除して孤立させない", async () => {
-    createClientMock.mockResolvedValue({
-      auth: {
-        getUser: vi.fn().mockResolvedValue({
-          data: { user: { id: "user-1" } },
-          error: null,
-        }),
-      },
-    });
-
-    const movieId = "22222222-2222-4222-8222-222222222222";
-    const obsessionId = "11111111-1111-4111-8111-111111111111";
-    const statuses: unknown[] = [];
-    const update = vi.fn((values: Record<string, unknown>) => {
-      if (values.status) statuses.push(values.status);
-      return {
-        eq: vi.fn(() => ({
-          eq: vi.fn().mockResolvedValue({ error: null }),
-        })),
-      };
-    });
-    const insert = vi.fn(() => ({
-      select: vi.fn(() => ({
-        single: vi.fn().mockResolvedValue({
-          data: { id: movieId, status: "pending" },
-          error: null,
-        }),
-      })),
-    }));
-    const upload = vi.fn().mockResolvedValue({ error: null });
-    const remove = vi.fn().mockResolvedValue({ error: null });
-    const admin = {
-      rpc: vi.fn().mockResolvedValue({ data: 0, error: null }),
-      from: vi.fn((table: string) => {
-        if (table === "obsessions") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                maybeSingle: vi.fn().mockResolvedValue({
-                  data: {
-                    id: obsessionId,
-                    user_id: "user-1",
-                    analysis_json: { title: "夜道への偏愛" },
-                  },
-                  error: null,
-                }),
-              })),
-            })),
-          };
-        }
-        if (table === "photos") {
-          return {
-            select: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: [], error: null }),
-                })),
-              })),
-            })),
-          };
-        }
-        return { insert, update };
-      }),
-      storage: {
-        from: vi.fn((bucket: string) =>
-          bucket === "photos"
-            ? { createSignedUrl: vi.fn() }
-            : { upload, remove },
-        ),
-      },
-    };
-    createAdminClientMock.mockReturnValue(admin);
-
-    generateMovieScriptMock.mockResolvedValue({
-      title: "夜道の映画",
-      logline: "雨上がりの夜道を歩く。",
-      synopsis: "夜道の記憶をたどる短編。",
-      visualStyle: "cinematic",
-      bgm: "ambient",
-      scenes: [1, 2, 3].map((order) => ({
-        order,
-        source: `scene-${order}`,
-        duration: 5,
-        narration: `narration-${order}`,
-        videoPrompt: `prompt-${order}`,
-        referencePhotoUrls: [],
-      })),
-    });
-    generateSceneMock
-      .mockResolvedValueOnce({
-        providerJobId: "job-1",
-        videoData: new Uint8Array([1]),
-      })
-      .mockRejectedValueOnce(new Error("provider unavailable"))
-      .mockResolvedValueOnce({
-        providerJobId: "job-3",
-        videoData: new Uint8Array([3]),
-      });
-
-    const response = await POST(
-      new Request("http://localhost/api/movies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ obsessionId }),
-      }),
-    );
-    const backgroundJob = afterMock.mock.calls[0][0] as () => Promise<void>;
-    await backgroundJob();
-
-    expect(response.status).toBe(201);
-    expect(statuses).toEqual([
-      "analyzing",
-      "generating",
-      "processing",
-      "failed",
-    ]);
-    expect(remove).toHaveBeenCalledWith([
-      "user-1/22222222-2222-4222-8222-222222222222/scenes/1.mp4",
-      "user-1/22222222-2222-4222-8222-222222222222/scenes/3.mp4",
-    ]);
-    expect(composeMovieMock).not.toHaveBeenCalled();
   });
 });

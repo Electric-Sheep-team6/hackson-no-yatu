@@ -1,5 +1,17 @@
-import { MovieApp } from "@/app/components/MovieApp";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
 
-export default function Home() {
-  return <MovieApp />;
+import { MovieApp } from "@/app/components/MovieApp";
+import { createClient } from "@/lib/supabase/server";
+
+export default async function Home() {
+  await connection();
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) redirect("/login");
+
+  return <MovieApp userEmail={user.email ?? "ログイン済み"} />;
 }

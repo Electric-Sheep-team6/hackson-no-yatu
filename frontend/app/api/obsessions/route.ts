@@ -30,7 +30,7 @@ export async function POST() {
         .select("storage_path")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(12),
+        .limit(26),
     ]);
 
     if (diariesResult.error) throw diariesResult.error;
@@ -99,7 +99,7 @@ export async function POST() {
       { status: 201 },
     );
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "POST /api/obsessions" });
   }
 }
 
@@ -132,6 +132,6 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "GET /api/obsessions" });
   }
 }

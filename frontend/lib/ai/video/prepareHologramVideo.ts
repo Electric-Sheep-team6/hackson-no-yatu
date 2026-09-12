@@ -1,0 +1,37 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+import { VIDEO_PROCESS_TIMEOUT_MS } from "../timeouts";
+import { resolveFfmpegPath } from "./runtimeAssets";
+
+const execFileAsync = promisify(execFile);
+const SQUARE_OUTPUT_SIZE = 720;
+const OUTPUT_FPS = 24;
+const OUTPUT_TIMESCALE = 24_000;
+
+export async function prepareHologramVideo(
+  video: Uint8Array,
+): Promise<Uint8Array> {
+  const directory = await mkdtemp(join(tmpdir(), "last-screen-scene-"));
+  const inputPath = join(directory, "source.mp4");
+  const outputPath = join(directory, "square.mp4");
+  try {
+    await writeFile(inputPath, video);
+    await execFileAsync(await resolveFfmpegPath(), [
+      "-y", "-i", inputPath,
+      "-vf", `crop='min(iw,ih)':'min(iw,ih)',scale=${SQUARE_OUTPUT_SIZE}:${SQUARE_OUTPUT_SIZE},setsar=1`,
+      // ホログラムファンにスピーカーは無いため音声は不要。
+      // 併せて、連結時に -c copy が安全に成立するよう映像パラメータを固定する。
+      "-an",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+      "-r", String(OUTPUT_FPS), "-video_track_timescale", String(OUTPUT_TIMESCALE),
+      "-movflags", "+faststart", outputPath,
+    ], { timeout: VIDEO_PROCESS_TIMEOUT_MS });
+    return new Uint8Array(await readFile(outputPath));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}

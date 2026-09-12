@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "POST /api/photos" });
   }
 }
 
@@ -126,6 +126,6 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    return errorResponse(error);
+    return errorResponse(error, { route: "GET /api/photos" });
   }
 }
