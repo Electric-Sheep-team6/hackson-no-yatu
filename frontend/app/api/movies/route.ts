@@ -12,8 +12,6 @@ export const runtime = "nodejs";
 // シーン生成1波（最大120秒）+ 連結（最大120秒）を300秒以内で完了させる。
 export const maxDuration = 300;
 
-const DAILY_MOVIE_LIMIT = 3;
-
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -47,17 +45,6 @@ export async function POST(request: Request) {
       { p_user_id: user.id },
     );
     if (staleMovieError) throw staleMovieError;
-
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count, error: countError } = await admin
-      .from("movies")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .gte("created_at", since);
-    if (countError) throw countError;
-    if ((count ?? 0) >= DAILY_MOVIE_LIMIT) {
-      throw new ApiError(429, "rate_limited", "映画生成は24時間に3回までです");
-    }
 
     const { data: movie, error: movieError } = await admin
       .from("movies")
