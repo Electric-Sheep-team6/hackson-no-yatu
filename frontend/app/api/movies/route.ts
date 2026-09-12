@@ -9,8 +9,7 @@ import { createMovieSchema } from "@/lib/validation";
 import { processMovieGeneration } from "./generation";
 
 export const runtime = "nodejs";
-// 通常時はシーン生成1波（最大120秒）+ 連結（最大120秒）で収まる。
-// タイムアウト再試行時は300秒を超え得るため、上限変更はプラン確認後に判断する。
+// シーン生成1波（最大120秒）+ 連結（最大120秒）を300秒以内で完了させる。
 export const maxDuration = 300;
 
 const DAILY_MOVIE_LIMIT = 3;

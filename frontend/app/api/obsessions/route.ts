@@ -39,7 +39,7 @@ export async function POST() {
         .select("storage_path")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(12),
+        .limit(26),
     ]);
 
     if (diariesResult.error) throw diariesResult.error;

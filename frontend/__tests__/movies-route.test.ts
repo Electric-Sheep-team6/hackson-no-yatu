@@ -40,7 +40,6 @@ vi.mock("@/lib/ai/video/geminiVideoGenerator", () => ({
 
 import { POST } from "@/app/api/movies/route";
 import {
-  MAX_SCENE_RETRIES,
   processMovieGeneration,
   SCENE_CONCURRENCY,
 } from "@/app/api/movies/generation";
@@ -267,11 +266,11 @@ describe("POST /api/movies", () => {
     await generation;
 
     expect(generateSceneMock).toHaveBeenCalledTimes(3);
-    expect(composeMovieMock).toHaveBeenCalledWith([
-      new Uint8Array([1]),
-      new Uint8Array([2]),
-      new Uint8Array([3]),
-    ]);
+    expect(composeMovieMock).toHaveBeenCalledWith(
+      [new Uint8Array([1]), new Uint8Array([2]), new Uint8Array([3])],
+      expect.objectContaining({ title: "title", logline: "logline" }),
+      expect.any(Number),
+    );
   });
 
   it("シーン生成の同時実行数が上限を超えない", async () => {
@@ -300,40 +299,57 @@ describe("POST /api/movies", () => {
     expect(generateSceneMock).toHaveBeenCalledTimes(3);
   });
 
-  it("一過性エラーを上限内で再試行して成功する", async () => {
-    vi.useFakeTimers();
+  it("一過性エラーでも自動再試行せず失敗する", async () => {
     const { admin, updates } = createGenerationAdmin();
     createAdminClientMock.mockReturnValue(admin);
     generateMovieScriptMock.mockResolvedValue(createScript());
     generateSceneMock.mockImplementation(async ({ prompt }: { prompt: string }) => {
-      if (prompt === "scene-1" && generateSceneMock.mock.calls.length === 1) {
-        throw { status: 429 };
-      }
+      if (prompt === "scene-1") throw { status: 429 };
       const order = Number(prompt.split("-")[1]);
       return { providerJobId: `job-${order}`, videoData: new Uint8Array([order]) };
     });
     composeMovieMock.mockResolvedValue(new Uint8Array([9]));
 
-    const generation = runGeneration();
-    await vi.runAllTimersAsync();
-    await generation;
+    await runGeneration();
 
-    expect(generateSceneMock).toHaveBeenCalledTimes(4);
-    expect(updates.at(-1)).toMatchObject({ status: "completed" });
+    expect(generateSceneMock).toHaveBeenCalledTimes(3);
+    expect(composeMovieMock).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({
+      status: "failed",
+      error_message: "シーン1の生成に失敗しました（レート制限）",
+    });
     const sceneUpdate = updates.find((value) =>
       typeof value.movie_json === "object" && !("status" in value),
     );
     expect(sceneUpdate).toMatchObject({
       movie_json: {
         generatedScenes: expect.arrayContaining([
-          expect.objectContaining({ order: 1, retryCount: 1, status: "succeeded" }),
+          expect.objectContaining({ order: 1, retryCount: 0, status: "failed" }),
         ]),
       },
     });
   });
 
-  it("再試行上限超過時に失敗段階と安全な分類を保存する", async () => {
-    vi.useFakeTimers();
+  it("Input blockedでも自動再試行せず失敗する", async () => {
+    const { admin, updates } = createGenerationAdmin();
+    createAdminClientMock.mockReturnValue(admin);
+    generateMovieScriptMock.mockResolvedValue(createScript([1]));
+    generateSceneMock.mockRejectedValue({
+      status: 400,
+      message: "Input blocked: prompt could not be processed",
+    });
+
+    await runGeneration();
+
+    expect(generateSceneMock).toHaveBeenCalledTimes(1);
+    expect(composeMovieMock).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({
+      status: "failed",
+      error_message: "シーン1の生成に失敗しました（入力ブロック）",
+    });
+  });
+
+  it("生成失敗時に失敗段階と安全な分類を保存する", async () => {
     const { admin, updates } = createGenerationAdmin();
     createAdminClientMock.mockReturnValue(admin);
     generateMovieScriptMock.mockResolvedValue(createScript());
@@ -344,11 +360,9 @@ describe("POST /api/movies", () => {
     });
     composeMovieMock.mockResolvedValue(new Uint8Array([9]));
 
-    const generation = runGeneration();
-    await vi.runAllTimersAsync();
-    await generation;
+    await runGeneration();
 
-    expect(generateSceneMock).toHaveBeenCalledTimes(3 + MAX_SCENE_RETRIES);
+    expect(generateSceneMock).toHaveBeenCalledTimes(3);
     expect(composeMovieMock).not.toHaveBeenCalled();
     expect(updates.at(-1)).toMatchObject({
       status: "failed",
@@ -361,7 +375,7 @@ describe("POST /api/movies", () => {
             expect.objectContaining({
               order: 2,
               providerJobId: null,
-              retryCount: MAX_SCENE_RETRIES,
+              retryCount: 0,
               status: "failed",
             }),
           ]),

@@ -7,8 +7,8 @@ import { TEXT_GENERATION_TIMEOUT_MS } from "./timeouts";
 export const GEMINI_TEXT_MODEL = "gemini-3.8-flash";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const MAX_TEXT_IMAGES = 12;
-const GEMINI_THINKING_LEVEL = "MINIMAL";
+const MAX_TEXT_IMAGES = 26;
+const GEMINI_THINKING_LEVEL = "LOW";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -52,7 +52,18 @@ async function requestStructuredText(
     }),
     signal: AbortSignal.timeout(TEXT_GENERATION_TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error("Gemini テキスト生成に失敗しました");
+  if (!response.ok) {
+    const providerError = await response.json().catch(() => null) as {
+      error?: { status?: string; message?: string };
+    } | null;
+    console.error(JSON.stringify({
+      stage: "gemini_text",
+      status: response.status,
+      providerStatus: providerError?.error?.status ?? null,
+      providerMessage: providerError?.error?.message?.slice(0, 500) ?? null,
+    }));
+    throw new Error(`Gemini テキスト生成に失敗しました（HTTP ${response.status}）`);
+  }
   const parsed = geminiResponseSchema.safeParse(await response.json());
   if (!parsed.success) throw new Error("Gemini の応答を読み取れませんでした");
   const text = parsed.data.candidates[0].content.parts.map((part) => part.text ?? "").join("");

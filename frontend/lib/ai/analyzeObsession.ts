@@ -19,7 +19,7 @@ export type ObsessionAnalysis = {
 };
 
 const MAX_DIARY_CHARS = 50_000;
-const MAX_TEXT_IMAGES = 12;
+const MAX_TEXT_IMAGES = 26;
 const ANALYSIS_INSTRUCTIONS = "あなたは個人の記録から偏愛を見つける編集者です。与えられた日記と写真だけを根拠に、日本語で分析してください。写真の内容が不確かな場合は断定せず、根拠には入力に実在する情報だけを書いてください。";
 
 const obsessionSchema = z.object({

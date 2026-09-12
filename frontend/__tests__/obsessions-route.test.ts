@@ -83,7 +83,7 @@ describe("POST /api/obsessions", () => {
     );
     expect(userFrom).not.toHaveBeenCalledWith("obsessions");
     expect(diaryLimit).toHaveBeenCalledWith(50);
-    expect(photoLimit).toHaveBeenCalledWith(12);
+    expect(photoLimit).toHaveBeenCalledWith(26);
   });
 
   it("24時間の上限到達時はAIを呼び出さず429を返す", async () => {

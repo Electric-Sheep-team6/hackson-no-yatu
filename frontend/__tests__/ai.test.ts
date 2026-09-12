@@ -56,15 +56,15 @@ describe("AI generation", () => {
     global.fetch = originalFetch;
   });
 
-  it("未設定時はOpenAIで日記と最大12枚の写真を分析する", async () => {
+  it("未設定時はOpenAIで日記と最大26枚の写真を分析する", async () => {
     responsesParse.mockResolvedValue({ output_parsed: analysis });
-    const photoUrls = Array.from({ length: 13 }, (_, index) => `https://example.com/${index}.jpg`);
+    const photoUrls = Array.from({ length: 27 }, (_, index) => `https://example.com/${index}.jpg`);
 
     await expect(analyzeObsession({ diaryTexts: ["駅まで歩いた"], photoUrls })).resolves.toEqual(analysis);
 
     const request = responsesParse.mock.calls[0][0];
     expect(request).toMatchObject({ model: "gpt-5.6-terra", store: false, reasoning: { effort: "low" } });
-    expect(request.input[0].content.filter((item: { type: string }) => item.type === "input_image")).toHaveLength(12);
+    expect(request.input[0].content.filter((item: { type: string }) => item.type === "input_image")).toHaveLength(26);
     expect(request.text.format.type).toBe("json_schema");
   });
 
@@ -81,7 +81,7 @@ describe("AI generation", () => {
     const body = JSON.parse((request as RequestInit).body as string);
     expect(body.generationConfig).toMatchObject({
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingLevel: "MINIMAL" },
+      thinkingConfig: { thinkingLevel: "LOW" },
     });
     expect(body.generationConfig.responseJsonSchema).toBeDefined();
   });

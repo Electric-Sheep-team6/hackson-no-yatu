@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +14,12 @@ const execFileAsync = promisify(execFile);
 const systemFfmpegPath = ["/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"].find(existsSync);
 const systemFfprobePath = ["/opt/homebrew/bin/ffprobe", "/usr/bin/ffprobe"].find(existsSync);
 const canUseSystemFfmpeg = Boolean(systemFfmpegPath);
+const systemFilters = systemFfmpegPath
+  ? spawnSync(systemFfmpegPath, ["-hide_banner", "-filters"], { encoding: "utf8" }).stdout
+  : "";
+const canUseSystemAss = /\sass\s/u.test(systemFilters);
 
-describe.skipIf(!canUseSystemFfmpeg || !systemFfprobePath)("composeMovie", () => {
+describe.skipIf(!canUseSystemFfmpeg || !systemFfprobePath || !canUseSystemAss)("composeMovie", () => {
   it("3シーンから約18.2秒の予告編MP4を生成する", async () => {
     const directory = await mkdtemp(join(tmpdir(), "last-screen-test-"));
     try {

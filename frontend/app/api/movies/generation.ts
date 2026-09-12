@@ -9,15 +9,11 @@ import type { GenerateSceneResult } from "@/lib/ai/video/VideoGenerator";
 import { selectReferenceImageUrls } from "@/lib/ai/video/selectReferenceImageUrls";
 import { beginMovieImageCache } from "@/lib/ai/referenceImage";
 import {
-  GENERATION_DEADLINE_MS,
-  SCENE_RETRY_REQUIRED_MS,
   VIDEO_CONCAT_TIMEOUT_MS,
 } from "@/lib/ai/timeouts";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const SCENE_CONCURRENCY = 3;
-export const MAX_SCENE_RETRIES = 1;
-export const SCENE_RETRY_BASE_MS = 1_000;
 export const MAX_SCENES = 3;
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -45,11 +41,6 @@ type SceneOutcome = {
   videoData?: Uint8Array;
 };
 
-type RetryResult = {
-  generated: GenerateSceneResult;
-  retryCount: number;
-};
-
 class GenerationStageError extends Error {
   constructor(
     readonly stageLabel: string,
@@ -62,7 +53,6 @@ class GenerationStageError extends Error {
 class SceneGenerationError extends Error {
   constructor(
     readonly category: ErrorCategory,
-    readonly retryCount: number,
     readonly providerJobId: string | null = null,
   ) {
     super("シーン生成に失敗しました");
@@ -74,7 +64,7 @@ function categoryLabel(category: ErrorCategory) {
     timeout: "タイムアウト",
     rate_limit: "レート制限",
     server: "外部サービスエラー",
-    input_blocked: "入力ブロック（一過性）",
+    input_blocked: "入力ブロック",
     other: "その他",
   };
 
@@ -127,10 +117,6 @@ function classifyError(error: unknown): ErrorCategory {
   return "other";
 }
 
-function isTransient(category: ErrorCategory) {
-  return category !== "other";
-}
-
 function logTiming(
   stage: "analyzing" | "generating" | "scene" | "concat" | "upload",
   movieId: string,
@@ -145,28 +131,10 @@ function logTiming(
   }));
 }
 
-function retryDelayMs(retryCount: number) {
-  return SCENE_RETRY_BASE_MS * 2 ** retryCount;
-}
-
-async function waitForRetry(retryCount: number) {
-  const delayMs = retryDelayMs(retryCount);
-
-  await new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-}
-
-function hasRetryBudget(deadline: number) {
-  return deadline - Date.now() >= SCENE_RETRY_REQUIRED_MS;
-}
-
-async function generateWithRetry(
+async function generateSceneOnce(
   scene: Scene,
   referenceImageUrls: string[],
-  deadline: number,
-  retryCount = 0,
-): Promise<RetryResult> {
+): Promise<GenerateSceneResult> {
   try {
     const generated = await geminiVideoGenerator.generateScene({
       prompt: scene.videoPrompt,
@@ -177,34 +145,16 @@ async function generateWithRetry(
     if (!generated.videoData) {
       throw new SceneGenerationError(
         "other",
-        retryCount,
         generated.providerJobId,
       );
     }
 
-    return { generated, retryCount };
+    return generated;
   } catch (error) {
     if (error instanceof SceneGenerationError) {
       throw error;
     }
-
-    const category = classifyError(error);
-    const canRetry =
-      isTransient(category)
-      && retryCount < MAX_SCENE_RETRIES;
-
-    if (!canRetry || !hasRetryBudget(deadline)) {
-      throw new SceneGenerationError(category, retryCount);
-    }
-
-    await waitForRetry(retryCount);
-
-    return generateWithRetry(
-      scene,
-      referenceImageUrls,
-      deadline,
-      retryCount + 1,
-    );
+    throw new SceneGenerationError(classifyError(error));
   }
 }
 
@@ -233,7 +183,6 @@ async function generateScene(
   photoUrls: string[],
   userId: string,
   movieId: string,
-  deadline: number,
 ): Promise<SceneOutcome> {
   const startedAt = Date.now();
 
@@ -244,7 +193,6 @@ async function generateScene(
       photoUrls,
       userId,
       movieId,
-      deadline,
     );
   } catch (error) {
     const sceneError =
@@ -258,7 +206,7 @@ async function generateScene(
         path: null,
         status: "failed",
         providerJobId: sceneError?.providerJobId ?? null,
-        retryCount: sceneError?.retryCount ?? 0,
+        retryCount: 0,
         errorCategory: sceneError?.category ?? classifyError(error),
         failureStage: sceneError ? "generation" : "upload",
       },
@@ -274,17 +222,15 @@ async function generateAndUploadScene(
   photoUrls: string[],
   userId: string,
   movieId: string,
-  deadline: number,
 ): Promise<SceneOutcome> {
   const referenceImageUrls = selectReferenceImageUrls(
     scene.referencePhotoUrls,
     photoUrls,
   );
 
-  const retryResult = await generateWithRetry(
+  const generated = await generateSceneOnce(
     scene,
     referenceImageUrls,
-    deadline,
   );
 
   const path = `${userId}/${movieId}/scenes/${scene.order}.mp4`;
@@ -293,7 +239,7 @@ async function generateAndUploadScene(
     await uploadScene(
       admin,
       path,
-      retryResult.generated.videoData!,
+      generated.videoData!,
     );
   } catch (error) {
     return {
@@ -301,8 +247,8 @@ async function generateAndUploadScene(
         order: scene.order,
         path: null,
         status: "failed",
-        providerJobId: retryResult.generated.providerJobId,
-        retryCount: retryResult.retryCount,
+        providerJobId: generated.providerJobId,
+        retryCount: 0,
         errorCategory: classifyError(error),
         failureStage: "upload",
       },
@@ -314,10 +260,10 @@ async function generateAndUploadScene(
       order: scene.order,
       path,
       status: "succeeded",
-      providerJobId: retryResult.generated.providerJobId,
-      retryCount: retryResult.retryCount,
+      providerJobId: generated.providerJobId,
+      retryCount: 0,
     },
-    videoData: retryResult.generated.videoData,
+    videoData: generated.videoData,
   };
 }
 
@@ -327,7 +273,6 @@ async function generateSceneBatches(
   photoUrls: string[],
   userId: string,
   movieId: string,
-  deadline: number,
   offset = 0,
 ): Promise<SceneOutcome[]> {
   const batch = scenes.slice(
@@ -347,7 +292,6 @@ async function generateSceneBatches(
         photoUrls,
         userId,
         movieId,
-        deadline,
       ),
     ),
   );
@@ -358,7 +302,6 @@ async function generateSceneBatches(
     photoUrls,
     userId,
     movieId,
-    deadline,
     offset + SCENE_CONCURRENCY,
   );
 
@@ -623,7 +566,6 @@ async function completeMovieGeneration(
   movieId: string,
   userId: string,
   obsession: ObsessionAnalysis,
-  deadline: number,
 ) {
   const photoUrls = await prepareGeneration(
     admin,
@@ -650,7 +592,6 @@ async function completeMovieGeneration(
     photoUrls,
     userId,
     movieId,
-    deadline,
   );
 
   const generatedScenes = outcomes.map(
@@ -693,9 +634,6 @@ export async function processMovieGeneration(
   userId: string,
   obsession: ObsessionAnalysis,
 ) {
-  const startedAt = Date.now();
-  const deadline =
-    startedAt + GENERATION_DEADLINE_MS;
   const admin = createAdminClient();
 
   // 同一映画の生成内では、同じ参照画像を一度しか取得しない。
@@ -707,7 +645,6 @@ export async function processMovieGeneration(
       movieId,
       userId,
       obsession,
-      deadline,
     );
   } catch (error) {
     await markFailed(
