@@ -105,6 +105,34 @@ describe("AI generation", () => {
     await expect(analyzeObsession({ diaryTexts: ["記録"], photoUrls: [] })).rejects.toThrow();
   });
 
+  it("Geminiが課金上限(RESOURCE_EXHAUSTED)を返したら利用者に分かるメッセージのApiErrorにする", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { status: "RESOURCE_EXHAUSTED", message: "Your prepayment credits are depleted." },
+    }), { status: 429 })) as typeof fetch;
+
+    await expect(analyzeObsession({ diaryTexts: ["記録"], photoUrls: [] })).rejects.toMatchObject({
+      status: 503,
+      code: "upstream_unavailable",
+      message: expect.stringContaining("利用上限"),
+    });
+  });
+
+  it("Geminiが一時的に利用不可(503)を返したら再試行を促すApiErrorにする", async () => {
+    vi.stubEnv("AI_TEXT_PROVIDER", "gemini");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { status: "UNAVAILABLE", message: "This model is currently experiencing high demand." },
+    }), { status: 503 })) as typeof fetch;
+
+    await expect(analyzeObsession({ diaryTexts: ["記録"], photoUrls: [] })).rejects.toMatchObject({
+      status: 503,
+      code: "upstream_unavailable",
+      message: expect.stringContaining("混み合っています"),
+    });
+  });
+
   it("偏愛分析へ送る日記本文を合計5万文字に制限する", async () => {
     vi.stubEnv("AI_TEXT_PROVIDER", "openai");
     responsesParse.mockResolvedValue({ output_parsed: analysis });

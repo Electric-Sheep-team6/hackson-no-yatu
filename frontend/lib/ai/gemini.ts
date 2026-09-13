@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ApiError } from "../apiError";
+
 import { loadReferenceImage } from "./referenceImage";
 
 import { TEXT_GENERATION_TIMEOUT_MS } from "./timeouts";
@@ -57,13 +59,23 @@ async function requestStructuredText(
     const providerError = await response.json().catch(() => null) as {
       error?: { status?: string; message?: string };
     } | null;
+    const providerStatus = providerError?.error?.status ?? null;
+    const providerMessage = providerError?.error?.message ?? "";
     console.error(JSON.stringify({
       stage: "gemini_text",
       status: response.status,
-      providerStatus: providerError?.error?.status ?? null,
-      providerMessage: providerError?.error?.message?.slice(0, 500) ?? null,
+      providerStatus,
+      providerMessage: providerMessage.slice(0, 500),
     }));
-    throw new Error(`Gemini テキスト生成に失敗しました（HTTP ${response.status}）`);
+    // Vercel Hobby の300秒予算(timeouts.tsのコメント参照)を守るため、ここでは
+    // 再試行せず1回で確定させる。その代わり、利用者・運用者が次に何をすべきか
+    // 分かるようエラー種別だけは判別してメッセージを出し分ける。
+    const isQuotaExhausted = providerStatus === "RESOURCE_EXHAUSTED"
+      || providerMessage.includes("prepayment credits");
+    const message = isQuotaExhausted
+      ? "AIサービスの利用上限（課金設定）に達しています。しばらくしてから再度お試しいただくか、管理者にご連絡ください。"
+      : "AIサービスが混み合っています。しばらくしてからもう一度お試しください。";
+    throw new ApiError(503, "upstream_unavailable", message);
   }
   const parsed = geminiResponseSchema.safeParse(await response.json());
   if (!parsed.success) throw new Error("Gemini の応答を読み取れませんでした");

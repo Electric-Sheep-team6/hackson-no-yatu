@@ -16,6 +16,7 @@ type ApiErrorCode =
   | "not_found"
   | "conflict"
   | "rate_limited"
+  | "upstream_unavailable"
   | "internal_error";
 
 export class ApiError extends Error {
@@ -42,7 +43,7 @@ function extractKnownFields(error: unknown): Record<string, unknown> {
   if (typeof error !== "object" || error === null) return {};
 
   const fields: Record<string, unknown> = {};
-  for (const key of ["code", "details", "hint", "status"] as const) {
+  for (const key of ["code", "details", "hint", "status", "providerStatus", "retryable"] as const) {
     if (key in error) {
       fields[key] = (error as Record<string, unknown>)[key];
     }
