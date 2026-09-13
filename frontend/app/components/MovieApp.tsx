@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMovieFlow } from "@/app/hooks/useMovieFlow";
 import { createClient } from "@/lib/supabase/client";
+import { DEMO_MOTIFS, DEMO_TRAILER } from "@/app/data/demoTrailer";
 
 export function MovieApp({ userEmail }: { userEmail: string }) {
   const flow = useMovieFlow();
@@ -12,6 +13,9 @@ export function MovieApp({ userEmail }: { userEmail: string }) {
   const disabled = flow.busy !== null;
   const [signingOut, setSigningOut] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  // プレゼン用デモ表示の状態。実際の分析・生成APIは呼ばず、#12の完成素材をそのまま出す。
+  const [demoObsessionRevealed, setDemoObsessionRevealed] = useState(false);
+  const [demoMovieRevealed, setDemoMovieRevealed] = useState(false);
 
   const signOut = async () => {
     if (signingOut) return;
@@ -100,19 +104,55 @@ export function MovieApp({ userEmail }: { userEmail: string }) {
           </div>
           <div className="action-line">
             <p>日記 {flow.diaries.length}件　写真 {flow.photoCount}枚　動画 {flow.videoCount}本</p>
-            <button type="button" onClick={flow.analyze} disabled={disabled || flow.diaries.length + flow.photoCount === 0} className="button button-wide">{flow.busy === "analysis" ? "分析中..." : "わたしの偏愛を見つける"}</button>
+            <button type="button" onClick={() => setDemoObsessionRevealed(true)} className="button button-wide">{demoObsessionRevealed ? "抽出済み" : "動画の偏愛を抽出する"}</button>
           </div>
-          {flow.obsession && <article className="obsession-result"><p className="eyebrow">YOUR OBSESSION</p><h3>{flow.obsession.title}</h3><p>{flow.obsession.reason}</p></article>}
+          {demoObsessionRevealed && (
+            <article className="obsession-result">
+              <p className="eyebrow">YOUR OBSESSION</p>
+              <h3>{DEMO_TRAILER.title}</h3>
+              <p>{DEMO_TRAILER.logline}</p>
+              <div className="motif-grid">
+                {DEMO_MOTIFS.map((motif) => (
+                  <figure key={motif.id} className="motif-card">
+                    <Image src={motif.imageSrc} alt={motif.name} width={512} height={512} unoptimized />
+                    <figcaption>
+                      <p className="motif-name">{motif.name}<span>×{motif.count}</span></p>
+                      <p className="motif-description">{motif.description}</p>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            </article>
+          )}
+
+          {/* 実際の分析処理（開発一時停止中のため非表示のまま温存） */}
+          <div hidden>
+            <div className="action-line">
+              <p>日記 {flow.diaries.length}件　写真 {flow.photoCount}枚　動画 {flow.videoCount}本</p>
+              <button type="button" onClick={flow.analyze} disabled={disabled || flow.diaries.length + flow.photoCount === 0} className="button button-wide">{flow.busy === "analysis" ? "分析中..." : "わたしの偏愛を見つける"}</button>
+            </div>
+            {flow.obsession && <article className="obsession-result"><p className="eyebrow">YOUR OBSESSION</p><h3>{flow.obsession.title}</h3><p>{flow.obsession.reason}</p></article>}
+          </div>
         </section>
 
         <section className="process-section screening-section" aria-labelledby="movie-title">
           <div className="section-heading">
             <p className="step-number">03</p>
-            <div><p className="eyebrow">LAST SCREENING</p><h2 id="movie-title">偏愛を、一本の映画にする</h2><p>実際の記録を中心に、AIの象徴映像を織り交ぜた約56秒の予告編です。</p></div>
+            <div><p className="eyebrow">LAST SCREENING</p><h2 id="movie-title">偏愛を、一本の映画にする</h2><p>実際の記録を中心に、AIの象徴映像を織り交ぜた約60秒の予告編です。</p></div>
           </div>
-          <button type="button" onClick={flow.generate} disabled={disabled || !flow.obsession || flow.photoCount === 0} className="button premiere-button">{flow.busy === "movie" ? "映画を編集中..." : "人生の映画をつくる"}</button>
-          <div className="screen-frame">
-            {flow.movie?.videoUrl ? <video controls preload="metadata" src={flow.movie.videoUrl}>生成した映画</video> : <div className="empty-screen"><span>MADE IN MEIDO</span><p>{flow.movie?.status === "failed" ? flow.movie.errorMessage ?? "映画生成に失敗しました。" : flow.movie ? `生成状態: ${flow.movie.status}` : "あなたの映画は、ここで上映されます。"}</p></div>}
+          <button type="button" onClick={() => setDemoMovieRevealed(true)} disabled={!demoObsessionRevealed} className="button premiere-button">{demoMovieRevealed ? "上映中" : "人生の映画をつくる"}</button>
+          <div className="screen-frame screen-frame--square">
+            {demoMovieRevealed
+              ? <video controls preload="metadata" poster={DEMO_TRAILER.posterSrc} src={DEMO_TRAILER.videoSrc}>生成した映画</video>
+              : <div className="empty-screen"><span>MADE IN MEIDO</span><p>{demoObsessionRevealed ? "あなたの映画は、ここで上映されます。" : "先に偏愛を抽出してください。"}</p></div>}
+          </div>
+
+          {/* 実際の生成処理（開発一時停止中のため非表示のまま温存） */}
+          <div hidden>
+            <button type="button" onClick={flow.generate} disabled={disabled || !flow.obsession || flow.photoCount === 0} className="button premiere-button">{flow.busy === "movie" ? "映画を編集中..." : "人生の映画をつくる"}</button>
+            <div className="screen-frame">
+              {flow.movie?.videoUrl ? <video controls preload="metadata" src={flow.movie.videoUrl}>生成した映画</video> : <div className="empty-screen"><span>MADE IN MEIDO</span><p>{flow.movie?.status === "failed" ? flow.movie.errorMessage ?? "映画生成に失敗しました。" : flow.movie ? `生成状態: ${flow.movie.status}` : "あなたの映画は、ここで上映されます。"}</p></div>}
+            </div>
           </div>
         </section>
 

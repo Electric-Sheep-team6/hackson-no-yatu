@@ -263,10 +263,21 @@ button, label, input, textarea { -webkit-tap-highlight-color: transparent; }
 .obsession-result h3 { margin-top: 12px; font-family: "Yu Mincho", "游明朝", serif; font-size: 30px; font-weight: 400; }
 .obsession-result > p:last-child { margin-top: 15px; color: #435b64; line-height: 1.9; }
 
+.motif-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.motif-card { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.5); overflow: hidden; }
+.motif-card img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+.motif-card figcaption { padding: 16px 18px; }
+.motif-name { font-family: "Yu Mincho", "游明朝", serif; font-size: 18px; display: flex; align-items: baseline; gap: 8px; }
+.motif-name span { font-family: inherit; font-size: 13px; color: var(--sky-600); }
+.motif-description { margin-top: 8px; color: #435b64; font-size: 13px; line-height: 1.8; }
+
 .premiere-button { display: block; min-width: 260px; margin: 58px auto 38px; }
 .screen-frame { width: min(930px, 100%); margin: 0 auto; padding: 12px; background: #0b1115; box-shadow: 0 28px 70px rgba(21, 96, 130, 0.2); }
 .screen-frame video,
 .empty-screen { display: block; width: 100%; aspect-ratio: 16 / 9; background: #020405; }
+.screen-frame--square video,
+.screen-frame--square .empty-screen { aspect-ratio: 1 / 1; }
+.screen-frame video { object-fit: contain; }
 .empty-screen { display: flex; align-items: center; justify-content: center; flex-direction: column; border: 1px solid rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.58); }
 .empty-screen span { font-family: "Times New Roman", serif; font-size: clamp(25px, 4vw, 46px); letter-spacing: 0.13em; }
 .empty-screen p { margin-top: 17px; font-size: 11px; letter-spacing: 0.1em; }
@@ -352,6 +363,7 @@ footer span { color: var(--ink); font-family: "Times New Roman", "Yu Mincho", se
   .upload-control { min-height: 135px; }
   .action-line { margin-top: 42px; align-items: stretch; flex-direction: column; }
   .obsession-result { padding: 28px 24px; }
+  .motif-grid { grid-template-columns: 1fr; }
   .screen-frame { padding: 6px; }
   footer { align-items: flex-start; flex-direction: column; }
   .auth-page-frame { width: min(100% - 28px, 1040px); padding-top: 26px; }
